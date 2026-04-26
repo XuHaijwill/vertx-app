@@ -1,0 +1,13 @@
+# ============================================================
+# application-DEV.yml — 开发环境
+# 激活方式: set APP_ENV=DEV 或系统变量 APP_ENV=DEV
+# ============================================================
+
+db:
+  host: 192.168.60.134
+  port: 5432
+  database: vertx
+  user: postgres
+  password: 123456
+  pool-size: 10
+  ssl: false

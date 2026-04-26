@@ -2,6 +2,7 @@ package com.example.service;
 
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
+import com.example.core.PageResult;
 
 import java.util.List;
 
@@ -24,6 +25,11 @@ public interface UserService {
      * Search users by keyword - 关键词搜索用户
      */
     Future<List<JsonObject>> search(String keyword);
+
+    /**
+     * Paginated users
+     */
+    Future<PageResult<JsonObject>> findPaginated(int page, int size);
 
     /**
      * Create user - 创建用户

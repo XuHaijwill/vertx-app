@@ -1,0 +1,16 @@
+# ============================================================
+# application-PROD.yml — 生产环境
+# 激活方式: set APP_ENV=PROD
+# ============================================================
+
+app:
+  http-port: 80
+
+db:
+  host: prod-db.example.com
+  port: 5432
+  database: vertx_prod
+  user: prod_user
+  password: ${DB_PASSWORD}
+  pool-size: 50
+  ssl: true

@@ -1,0 +1,16 @@
+# ============================================================
+# application-UAT.yml — UAT 环境
+# 激活方式: set APP_ENV=UAT
+# ============================================================
+
+app:
+  http-port: 8889
+
+db:
+  host: uat-db.example.com
+  port: 5432
+  database: vertx_uat
+  user: uat_user
+  password: uat_password
+  pool-size: 20
+  ssl: true
