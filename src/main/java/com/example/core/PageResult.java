@@ -5,16 +5,14 @@ import io.vertx.core.json.JsonObject;
 
 import java.util.List;
 
-/**
- * Page Result - 分页结果
- */
+/** Page Result */
 public class PageResult<T> {
 
-    private List<T> list;      // 数据列表
-    private long total;        // 总记录数
-    private int page;          // 当前页
-    private int size;          // 每页大小
-    private long pages;        // 总页数
+    private List<T> list;
+    private long total;
+    private int page;
+    private int size;
+    private long pages;
 
     public PageResult() {}
 
@@ -25,8 +23,6 @@ public class PageResult<T> {
         this.size = size;
         this.pages = (total + size - 1) / size;
     }
-
-    // ========== Convert to JSON ==========
 
     public JsonObject toJson() {
         return new JsonObject()
@@ -41,19 +37,13 @@ public class PageResult<T> {
         JsonArray arr = new JsonArray();
         if (list != null) {
             for (T item : list) {
-                if (item instanceof JsonObject) {
-                    arr.add((JsonObject) item);
-                } else if (item instanceof JsonArray) {
-                    arr.add((JsonArray) item);
-                } else {
-                    arr.add(item);
-                }
+                if (item instanceof JsonObject) arr.add((JsonObject) item);
+                else if (item instanceof JsonArray) arr.add((JsonArray) item);
+                else arr.add(item);
             }
         }
         return arr;
     }
-
-    // ========== Getters & Setters ==========
 
     public List<T> getList() { return list; }
     public void setList(List<T> list) { this.list = list; }

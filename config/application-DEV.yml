@@ -2,6 +2,8 @@
 # application-DEV.yml — 开发环境
 # 激活方式: set APP_ENV=DEV 或系统变量 APP_ENV=DEV
 # ============================================================
+app:
+  http-port: 8881
 
 db:
   host: 192.168.60.134

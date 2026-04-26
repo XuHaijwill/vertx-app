@@ -3,8 +3,9 @@ package com.example.db;
 import com.example.core.Config;
 import io.vertx.core.*;
 import io.vertx.core.json.JsonObject;
+import io.vertx.pgclient.PgBuilder;
 import io.vertx.pgclient.PgConnectOptions;
-import io.vertx.pgclient.PgPool;
+import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.PoolOptions;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.RowSet;
@@ -30,7 +31,7 @@ public class DatabaseVerticle extends AbstractVerticle {
 
     public static final String DB_POOL = "db.pool";
 
-    private PgPool pool;
+    private Pool pool;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -44,14 +45,14 @@ public class DatabaseVerticle extends AbstractVerticle {
         int    poolSize = Config.getDbPoolSize(cfg);
         boolean ssl     = Config.getDbSsl(cfg);
 
-        LOG.info("🔧 DB config — host={}:{}/{} user={} poolSize={} ssl={}",
+        LOG.info("[DB] host={}:{}/{} user={} poolSize={} ssl={}",
                  host, port, database, user, poolSize, ssl);
 
         // Demo mode: host is the default (localhost) AND password is default → no real DB
         boolean demoMode = (host.equals("localhost") && password.equals("postgres"));
 
         if (demoMode) {
-            LOG.warn("⚠️  No DB configured — running DEMO MODE (no database)");
+            LOG.warn("[DB] No DB configured - running DEMO MODE (no database)");
             startPromise.complete();
             return;
         }
@@ -62,8 +63,6 @@ public class DatabaseVerticle extends AbstractVerticle {
             .setDatabase(database)
             .setUser(user)
             .setPassword(password)
-            .setIdleTimeout(30)
-            .setConnectTimeout(10_000)
             .setSslMode(ssl ? io.vertx.pgclient.SslMode.REQUIRE : io.vertx.pgclient.SslMode.DISABLE);
 
         PoolOptions poolOpts = new PoolOptions()
@@ -72,24 +71,27 @@ public class DatabaseVerticle extends AbstractVerticle {
             .setEventLoopSize(4)
             .setShared(true);
 
-        pool = PgPool.pool(vertx, connectOptions, poolOpts);
+        // Vert.x 5: PgPool is removed, use PgBuilder.builder().with().connectingTo().using().build()
+        pool = PgBuilder.pool()
+            .with(poolOpts)
+            .connectingTo(connectOptions)
+            .using(vertx)
+            .build();
 
-        LOG.info("📦 Connecting to PostgreSQL {}:{}/{}", host, port, database);
+        LOG.info("[DB] Connecting to PostgreSQL {}:{}/{}", host, port, database);
 
         initializeTables()
             .compose(v -> {
                 context.put(DB_POOL, pool);
-                // Publish connection URI to sharedData so other verticles can get the shared pool.
-                // PgPoolImpl can't be stored in sharedData, so we store the URI string instead.
                 String connUri = String.format("postgresql://%s:%s@%s:%d/%s", user, password, host, port, database);
                 vertx.sharedData().getLocalMap("db").put("conn-uri", connUri);
-                LOG.info("✅ PostgreSQL connected");
+                LOG.info("[DB] PostgreSQL connected");
                 startPromise.complete();
                 return Future.succeededFuture();
             })
             .onFailure(err -> {
-                LOG.error("❌ Failed to initialize database", err);
-                LOG.warn("⚠️  Running in DEMO MODE");
+                LOG.error("[DB] Failed to initialize database", err);
+                LOG.warn("[DB] Running in DEMO MODE");
                 startPromise.complete();
             });
     }
@@ -98,7 +100,7 @@ public class DatabaseVerticle extends AbstractVerticle {
     public void stop(Promise<Void> stopPromise) {
         if (pool != null) {
             pool.close()
-                .onSuccess(v -> { LOG.info("🛑 DB pool closed"); stopPromise.complete(); })
+                .onSuccess(v -> { LOG.info("[DB] Pool closed"); stopPromise.complete(); })
                 .onFailure(stopPromise::fail);
         } else {
             stopPromise.complete();
@@ -109,33 +111,34 @@ public class DatabaseVerticle extends AbstractVerticle {
     // Public helpers
     // ================================================================
 
-    public static PgPool getPool(Vertx vertx) {
+    public static Pool getPool(Vertx vertx) {
         if (vertx == null) return null;
-        // Try context first (same-verticle access)
-        PgPool p = (PgPool) vertx.getOrCreateContext().get(DB_POOL);
+        Pool p = (Pool) vertx.getOrCreateContext().get(DB_POOL);
         if (p != null) return p;
-        // Try sharedData: parse stored URI to rebuild shared pool.
-        // Vert.x returns the SAME pool instance when name + connectOptions match.
         var map = vertx.sharedData().getLocalMap("db");
         String connUri = map != null ? (String) map.get("conn-uri") : null;
         if (connUri != null) {
             try {
-                // Rebuild connect options from URI and create shared pool
                 PgConnectOptions opts = PgConnectOptions.fromUri(connUri);
                 PoolOptions poolOpts = new PoolOptions()
                     .setMaxSize(10)
                     .setName("vertx-app-pool")
                     .setShared(true);
-                return PgPool.pool(vertx, opts, poolOpts);
+                // Vert.x 5: use PgBuilder instead of PgPool.pool()
+                return PgBuilder.pool()
+                    .with(poolOpts)
+                    .connectingTo(opts)
+                    .using(vertx)
+                    .build();
             } catch (Exception e) {
-                LOG.warn("⚠️  Failed to rebuild shared pool from URI", e);
+                LOG.warn("[DB] Failed to rebuild shared pool from URI", e);
             }
         }
         return null;
     }
 
     public static Future<RowSet<Row>> query(Vertx vertx, String sql, Tuple params) {
-        PgPool pool = getPool(vertx);
+        Pool pool = getPool(vertx);
         if (pool == null) {
             return Future.failedFuture("Database not available (demo mode)");
         }
@@ -229,11 +232,10 @@ public class DatabaseVerticle extends AbstractVerticle {
     private Future<Void> executeSQL(String sql) {
         Promise<Void> p = Promise.promise();
         pool.query(sql).execute()
-            .onSuccess(rows -> { LOG.debug("SQL OK: {} rows", rows.rowCount()); p.complete(); })
+            .onSuccess(rows -> { LOG.debug("[DB] SQL OK: {} rows", rows.rowCount()); p.complete(); })
             .onFailure(err -> {
-                // Log full error so failures to run DDL are visible during startup
-                LOG.warn("SQL execution failed (non-fatal). SQL: {} Error: {}", sql, err.getMessage());
-                LOG.debug("Full SQL error: ", err);
+                LOG.warn("[DB] SQL failed (non-fatal): {} Error: {}", sql, err.getMessage());
+                LOG.debug("[DB] Full SQL error: ", err);
                 p.complete();
             });
         return p.future();

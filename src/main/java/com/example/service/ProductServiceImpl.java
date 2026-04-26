@@ -26,7 +26,7 @@ public class ProductServiceImpl implements ProductService {
         this.dbAvailable = checkDbAvailability(vertx);
         
         if (!dbAvailable) {
-            LOG.warn("⚠️  Database not available - using demo mode");
+            LOG.warn("Database not available - using demo mode");
         }
     }
 
@@ -147,9 +147,10 @@ public class ProductServiceImpl implements ProductService {
     }
 
     // ================================================================
-    // ADDITIONAL METHODS
+    // PAGINATION
     // ================================================================
 
+    @Override
     public Future<PageResult<JsonObject>> findPaginated(int page, int size) {
         if (!dbAvailable) {
             List<JsonObject> demo = getDemoProducts();
@@ -163,6 +164,38 @@ public class ProductServiceImpl implements ProductService {
             .compose(total -> productRepository.findPaginated(page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));
     }
+
+    @Override
+    public Future<PageResult<JsonObject>> searchPaginated(String keyword, String category, int page, int size) {
+        if (!dbAvailable) {
+            List<JsonObject> products = getDemoProducts().stream()
+                .filter(p -> "active".equals(p.getString("status")))
+                .toList();
+            if (keyword != null && !keyword.isEmpty()) {
+                String lower = keyword.toLowerCase();
+                products = products.stream()
+                    .filter(p -> p.getString("name", "").toLowerCase().contains(lower))
+                    .toList();
+            }
+            if (category != null && !category.isEmpty()) {
+                products = products.stream()
+                    .filter(p -> category.equalsIgnoreCase(p.getString("category", "")))
+                    .toList();
+            }
+            int start = (page - 1) * size;
+            int end = Math.min(start + size, products.size());
+            List<JsonObject> pageData = start < products.size() ? products.subList(start, end) : List.of();
+            return Future.succeededFuture(new PageResult<>(pageData, products.size(), page, size));
+        }
+
+        return productRepository.searchCount(keyword, category)
+            .compose(total -> productRepository.searchPaginated(keyword, category, page, size)
+                .map(list -> new PageResult<>(list, total, page, size)));
+    }
+
+    // ================================================================
+    // ADDITIONAL METHODS
+    // ================================================================
 
     public Future<List<JsonObject>> findByCategory(String category) {
         if (!dbAvailable) {

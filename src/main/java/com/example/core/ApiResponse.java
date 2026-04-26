@@ -4,7 +4,6 @@ import io.vertx.core.json.JsonObject;
 
 /**
  * Unified API Response Wrapper
- * 统一响应格式
  */
 public class ApiResponse {
 
@@ -12,11 +11,11 @@ public class ApiResponse {
     public static final String ERROR = "error";
     public static final String FAIL = "fail";
 
-    private String code;      // 状态码: success/error/fail
-    private String message;   // 消息
-    private Object data;      // 数据
-    private long timestamp;    // 时间戳
-    private long duration;    // 请求耗时(ms)
+    private String code;
+    private String message;
+    private Object data;
+    private long timestamp;
+    private long duration;
 
     public ApiResponse() {
         this.timestamp = System.currentTimeMillis();
@@ -24,65 +23,37 @@ public class ApiResponse {
 
     // ========== Static Factory Methods ==========
 
-    /**
-     * 成功响应
-     */
+    /** Success response */
     public static ApiResponse success() {
-        return new ApiResponse()
-            .setCode(SUCCESS)
-            .setMessage("操作成功");
+        return new ApiResponse().setCode(SUCCESS).setMessage("Success");
     }
 
-    /**
-     * 成功响应 + 数据
-     */
+    /** Success response with data */
     public static ApiResponse success(Object data) {
-        return new ApiResponse()
-            .setCode(SUCCESS)
-            .setMessage("操作成功")
-            .setData(data);
+        return new ApiResponse().setCode(SUCCESS).setMessage("Success").setData(data);
     }
 
-    /**
-     * 成功响应 + 自定义消息
-     */
+    /** Success response with custom message */
     public static ApiResponse success(String message, Object data) {
-        return new ApiResponse()
-            .setCode(SUCCESS)
-            .setMessage(message)
-            .setData(data);
+        return new ApiResponse().setCode(SUCCESS).setMessage(message).setData(data);
     }
 
-    /**
-     * 错误响应
-     */
+    /** Error response */
     public static ApiResponse error(String message) {
-        return new ApiResponse()
-            .setCode(ERROR)
-            .setMessage(message);
+        return new ApiResponse().setCode(ERROR).setMessage(message);
     }
 
-    /**
-     * 错误响应 + 自定义码
-     */
+    /** Error response with code */
     public static ApiResponse error(String code, String message) {
-        return new ApiResponse()
-            .setCode(code)
-            .setMessage(message);
+        return new ApiResponse().setCode(code).setMessage(message);
     }
 
-    /**
-     * 失败响应
-     */
+    /** Fail response */
     public static ApiResponse fail(String message) {
-        return new ApiResponse()
-            .setCode(FAIL)
-            .setMessage(message);
+        return new ApiResponse().setCode(FAIL).setMessage(message);
     }
 
-    /**
-     * 分页响应
-     */
+    /** Paginated response */
     public static ApiResponse page(Object list, long total, int page, int size) {
         JsonObject pageData = new JsonObject()
             .put("list", list)
@@ -90,11 +61,7 @@ public class ApiResponse {
             .put("page", page)
             .put("size", size)
             .put("pages", (total + size - 1) / size);
-
-        return new ApiResponse()
-            .setCode(SUCCESS)
-            .setMessage("查询成功")
-            .setData(pageData);
+        return new ApiResponse().setCode(SUCCESS).setMessage("Query successful").setData(pageData);
     }
 
     // ========== Convert to JSON ==========
@@ -104,46 +71,25 @@ public class ApiResponse {
             .put("code", code)
             .put("message", message)
             .put("timestamp", timestamp);
-
-        if (data != null) {
-            json.put("data", data);
-        }
-        if (duration > 0) {
-            json.put("duration", duration);
-        }
-
+        if (data != null) json.put("data", data);
+        if (duration > 0) json.put("duration", duration);
         return json;
     }
 
     // ========== Getters & Setters ==========
 
     public String getCode() { return code; }
-    public ApiResponse setCode(String code) {
-        this.code = code;
-        return this;
-    }
+    public ApiResponse setCode(String code) { this.code = code; return this; }
 
     public String getMessage() { return message; }
-    public ApiResponse setMessage(String message) {
-        this.message = message;
-        return this;
-    }
+    public ApiResponse setMessage(String message) { this.message = message; return this; }
 
     public Object getData() { return data; }
-    public ApiResponse setData(Object data) {
-        this.data = data;
-        return this;
-    }
+    public ApiResponse setData(Object data) { this.data = data; return this; }
 
     public long getTimestamp() { return timestamp; }
-    public ApiResponse setTimestamp(long timestamp) {
-        this.timestamp = timestamp;
-        return this;
-    }
+    public ApiResponse setTimestamp(long ts) { this.timestamp = ts; return this; }
 
     public long getDuration() { return duration; }
-    public ApiResponse setDuration(long duration) {
-        this.duration = duration;
-        return this;
-    }
+    public ApiResponse setDuration(long d) { this.duration = d; return this; }
 }

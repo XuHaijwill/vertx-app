@@ -49,7 +49,7 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
               example:
                 code: success
-                message: 操作成功
+                message: Operation successful
                 data:
                   status: UP
                   service: my-vertx-app
@@ -140,7 +140,7 @@ paths:
                 $ref: '#/components/schemas/UsersResponse'
               example:
                 code: success
-                message: 操作成功
+                message: Operation successful
                 data:
                   - id: 1
                     name: Alice
@@ -479,7 +479,7 @@ components:
           example: success
         message:
           type: string
-          example: 操作成功
+          example: Operation successful
         data:
           type: object
         timestamp:

@@ -2,39 +2,18 @@ package com.example.service;
 
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
+import com.example.core.PageResult;
+import java.util.List;
 
-/**
- * Product Service Interface - 产品服务接口
- */
+/** Product Service Interface */
 public interface ProductService {
 
-    /**
-     * Get all products
-     */
-    Future<java.util.List<JsonObject>> findAll();
-
-    /**
-     * Get product by ID
-     */
+    Future<List<JsonObject>> findAll();
     Future<JsonObject> findById(Long id);
-
-    /**
-     * Search products
-     */
-    Future<java.util.List<JsonObject>> search(String keyword, String category);
-
-    /**
-     * Create product
-     */
+    Future<List<JsonObject>> search(String keyword, String category);
+    Future<PageResult<JsonObject>> findPaginated(int page, int size);
+    Future<PageResult<JsonObject>> searchPaginated(String keyword, String category, int page, int size);
     Future<JsonObject> create(JsonObject product);
-
-    /**
-     * Update product
-     */
     Future<JsonObject> update(Long id, JsonObject product);
-
-    /**
-     * Delete product
-     */
     Future<Void> delete(Long id);
 }

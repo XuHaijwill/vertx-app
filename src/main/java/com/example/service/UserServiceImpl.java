@@ -26,7 +26,7 @@ public class UserServiceImpl implements UserService {
         this.dbAvailable = checkDbAvailability(vertx);
         
         if (!dbAvailable) {
-            LOG.warn("⚠️  Database not available - using demo mode");
+            LOG.warn("Database not available - using demo mode");
         }
     }
 
@@ -74,7 +74,6 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Future<JsonObject> create(JsonObject user) {
-        // Validation
         if (user == null) {
             return Future.failedFuture(BusinessException.badRequest("Request body is required"));
         }
@@ -84,13 +83,11 @@ public class UserServiceImpl implements UserService {
         }
 
         if (!dbAvailable) {
-            // Demo mode - create in-memory
             JsonObject newUser = user.copy();
             newUser.put("id", System.currentTimeMillis());
             return Future.succeededFuture(newUser);
         }
 
-        // Check duplicate email
         return userRepository.existsByEmail(email)
             .compose(exists -> {
                 if (exists) {
@@ -111,7 +108,6 @@ public class UserServiceImpl implements UserService {
                 if (existing == null) {
                     return Future.<JsonObject>failedFuture(BusinessException.notFound("User"));
                 }
-                // Check email uniqueness if changed
                 String newEmail = user.getString("email");
                 if (newEmail != null && !newEmail.equals(existing.getString("email"))) {
                     return userRepository.existsByEmail(newEmail)
@@ -156,9 +152,10 @@ public class UserServiceImpl implements UserService {
     }
 
     // ================================================================
-    // ADDITIONAL METHODS
+    // PAGINATION
     // ================================================================
 
+    @Override
     public Future<PageResult<JsonObject>> findPaginated(int page, int size) {
         if (!dbAvailable) {
             List<JsonObject> demo = getDemoUsers();
@@ -172,6 +169,30 @@ public class UserServiceImpl implements UserService {
             .compose(total -> userRepository.findPaginated(page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));
     }
+
+    @Override
+    public Future<PageResult<JsonObject>> searchPaginated(String keyword, int page, int size) {
+        if (!dbAvailable) {
+            String lower = keyword.toLowerCase();
+            List<JsonObject> filtered = getDemoUsers().stream()
+                .filter(u -> u.getString("name", "").toLowerCase().contains(lower) ||
+                            u.getString("email", "").toLowerCase().contains(lower) ||
+                            u.getString("department", "").toLowerCase().contains(lower))
+                .toList();
+            int start = (page - 1) * size;
+            int end = Math.min(start + size, filtered.size());
+            List<JsonObject> pageData = start < filtered.size() ? filtered.subList(start, end) : List.of();
+            return Future.succeededFuture(new PageResult<>(pageData, filtered.size(), page, size));
+        }
+
+        return userRepository.searchCount(keyword)
+            .compose(total -> userRepository.searchPaginated(keyword, page, size)
+                .map(list -> new PageResult<>(list, total, page, size)));
+    }
+
+    // ================================================================
+    // ADDITIONAL METHODS
+    // ================================================================
 
     public Future<List<JsonObject>> findByDepartment(String department) {
         if (!dbAvailable) {

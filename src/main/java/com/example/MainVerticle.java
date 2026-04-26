@@ -3,7 +3,6 @@ package com.example;
 import com.example.core.ApiResponse;
 import com.example.core.BusinessException;
 import com.example.core.Config;
-import com.example.core.PageResult;
 import com.example.core.RequestValidator;
 import com.example.db.DatabaseVerticle;
 import com.example.repository.ProductRepository;
@@ -83,15 +82,14 @@ public class MainVerticle extends AbstractVerticle {
     private Future<Void> deployDatabaseVerticle() {
         Promise<Void> p = Promise.promise();
         vertx.deployVerticle("com.example.db.DatabaseVerticle",
-            new io.vertx.core.DeploymentOptions().setConfig(config()),
-            ar -> {
-                if (ar.succeeded()) {
-                    LOG.info("[OK] DatabaseVerticle deployed");
-                    p.complete();
-                } else {
-                    LOG.warn("[WARN] DatabaseVerticle failed: {}", ar.cause().getMessage());
-                    p.complete();  // demo mode — don't fail startup
-                }
+            new io.vertx.core.DeploymentOptions().setConfig(config()))
+            .onSuccess(id -> {
+                LOG.info("[OK] DatabaseVerticle deployed");
+                p.complete();
+            })
+            .onFailure(err -> {
+                LOG.warn("[WARN] DatabaseVerticle failed: {}", err.getMessage());
+                p.complete();  // demo mode — don't fail startup
             });
         return p.future();
     }
@@ -124,7 +122,8 @@ public class MainVerticle extends AbstractVerticle {
             "x-requested-with", "origin", "Content-Type", "accept",
             "Authorization", "X-Request-ID"));
 
-        router.route().handler(CorsHandler.create("*")
+        router.route().handler(CorsHandler.create()
+            .addOrigin("*")
             .allowedHeaders(headers)
             .allowedMethods(methods)
             .maxAgeSeconds(86400));
@@ -166,16 +165,15 @@ public class MainVerticle extends AbstractVerticle {
     // ================================================================
 
     private void addUserRoutes(Router router) {
-        Router ur = Router.router(vertx);
-
-        ur.get("/").handler(ctx -> {
+        // GET /api/users  — paginated list (optional ?q= search)
+        router.get("/api/users").handler(ctx -> {
             String q    = ctx.queryParam("q").stream().findFirst().orElse("");
             int page    = Int(ctx.queryParam("page"), 1);
             int size    = Int(ctx.queryParam("size"), 20);
             size = Math.min(100, Math.max(1, size));
             if (!q.isEmpty()) {
-                userService.search(q)
-                    .onSuccess(r -> ctx.json(ApiResponse.success(r).toJson()))
+                userService.searchPaginated(q, page, size)
+                    .onSuccess(r -> ctx.json(ApiResponse.success(r.toJson()).toJson()))
                     .onFailure(e -> handleError(ctx, e));
             } else {
                 userService.findPaginated(page, size)
@@ -184,7 +182,8 @@ public class MainVerticle extends AbstractVerticle {
             }
         });
 
-        ur.get("/:id").handler(ctx -> {
+        // GET /api/users/:id
+        router.get("/api/users/:id").handler(ctx -> {
             Long id = parseId(ctx.pathParam("id"));
             if (id == null) { handleError(ctx, BusinessException.badRequest("Invalid user ID")); return; }
             userService.findById(id)
@@ -192,7 +191,8 @@ public class MainVerticle extends AbstractVerticle {
                 .onFailure(e -> handleError(ctx, e));
         });
 
-        ur.post("/").handler(ctx -> {
+        // POST /api/users
+        router.post("/api/users").handler(ctx -> {
             JsonObject body = ctx.body().asJsonObject();
             RequestValidator.ValidationResult vr = RequestValidator.validateCreateUser(body);
             if (!vr.isValid()) {
@@ -205,7 +205,8 @@ public class MainVerticle extends AbstractVerticle {
                 .onFailure(e -> handleError(ctx, e));
         });
 
-        ur.put("/:id").handler(ctx -> {
+        // PUT /api/users/:id
+        router.put("/api/users/:id").handler(ctx -> {
             Long id = parseId(ctx.pathParam("id"));
             if (id == null) { handleError(ctx, BusinessException.badRequest("Invalid user ID")); return; }
             userService.update(id, ctx.body().asJsonObject())
@@ -213,15 +214,14 @@ public class MainVerticle extends AbstractVerticle {
                 .onFailure(e -> handleError(ctx, e));
         });
 
-        ur.delete("/:id").handler(ctx -> {
+        // DELETE /api/users/:id
+        router.delete("/api/users/:id").handler(ctx -> {
             Long id = parseId(ctx.pathParam("id"));
             if (id == null) { handleError(ctx, BusinessException.badRequest("Invalid user ID")); return; }
             userService.delete(id)
                 .onSuccess(r -> ctx.json(ApiResponse.success("User deleted", null).toJson()))
                 .onFailure(e -> handleError(ctx, e));
         });
-
-        router.mountSubRouter("/api/users", ur);
     }
 
     // ================================================================
@@ -229,23 +229,26 @@ public class MainVerticle extends AbstractVerticle {
     // ================================================================
 
     private void addProductRoutes(Router router) {
-        Router pr = Router.router(vertx);
-
-        pr.get("/").handler(ctx -> {
-            String q = ctx.queryParam("q").stream().findFirst().orElse("");
-            String cat = ctx.queryParam("category").stream().findFirst().orElse(null);
+        // GET /api/products — paginated list (optional ?q= and ?category=)
+        router.get("/api/products").handler(ctx -> {
+            String q    = ctx.queryParam("q").stream().findFirst().orElse("");
+            String cat  = ctx.queryParam("category").stream().findFirst().orElse(null);
+            int page    = Int(ctx.queryParam("page"), 1);
+            int size    = Int(ctx.queryParam("size"), 20);
+            size = Math.min(100, Math.max(1, size));
             if (!q.isEmpty() || cat != null) {
-                productService.search(q, cat)
-                    .onSuccess(r -> ctx.json(ApiResponse.success(r).toJson()))
+                productService.searchPaginated(q, cat, page, size)
+                    .onSuccess(r -> ctx.json(ApiResponse.success(r.toJson()).toJson()))
                     .onFailure(e -> handleError(ctx, e));
             } else {
-                productService.findAll()
-                    .onSuccess(r -> ctx.json(ApiResponse.success(r).toJson()))
+                productService.findPaginated(page, size)
+                    .onSuccess(r -> ctx.json(ApiResponse.success(r.toJson()).toJson()))
                     .onFailure(e -> handleError(ctx, e));
             }
         });
 
-        pr.get("/:id").handler(ctx -> {
+        // GET /api/products/:id
+        router.get("/api/products/:id").handler(ctx -> {
             Long id = parseId(ctx.pathParam("id"));
             if (id == null) { handleError(ctx, BusinessException.badRequest("Invalid product ID")); return; }
             productService.findById(id)
@@ -253,13 +256,15 @@ public class MainVerticle extends AbstractVerticle {
                 .onFailure(e -> handleError(ctx, e));
         });
 
-        pr.post("/").handler(ctx -> {
+        // POST /api/products
+        router.post("/api/products").handler(ctx -> {
             productService.create(ctx.body().asJsonObject())
                 .onSuccess(r -> { ctx.response().setStatusCode(201); ctx.json(ApiResponse.success("Product created", r).toJson()); })
                 .onFailure(e -> handleError(ctx, e));
         });
 
-        pr.put("/:id").handler(ctx -> {
+        // PUT /api/products/:id
+        router.put("/api/products/:id").handler(ctx -> {
             Long id = parseId(ctx.pathParam("id"));
             if (id == null) { handleError(ctx, BusinessException.badRequest("Invalid product ID")); return; }
             productService.update(id, ctx.body().asJsonObject())
@@ -267,15 +272,14 @@ public class MainVerticle extends AbstractVerticle {
                 .onFailure(e -> handleError(ctx, e));
         });
 
-        pr.delete("/:id").handler(ctx -> {
+        // DELETE /api/products/:id
+        router.delete("/api/products/:id").handler(ctx -> {
             Long id = parseId(ctx.pathParam("id"));
             if (id == null) { handleError(ctx, BusinessException.badRequest("Invalid product ID")); return; }
             productService.delete(id)
                 .onSuccess(r -> ctx.json(ApiResponse.success("Product deleted", null).toJson()))
                 .onFailure(e -> handleError(ctx, e));
         });
-
-        router.mountSubRouter("/api/products", pr);
     }
 
     // ================================================================
@@ -295,9 +299,28 @@ public class MainVerticle extends AbstractVerticle {
             }
         });
 
-        // Swagger UI from webjar
-        router.route("/swagger-ui/*").handler(StaticHandler.create()
-            .setWebRoot("META-INF/resources/webjars/swagger-ui/5.20.7"));
+        // Swagger UI from webjar (Vert.x 5: use classloader to read classpath resources)
+        router.route("/swagger-ui/*").handler(rc -> {
+            String reqPath = rc.request().path();
+            String resource = reqPath.replaceFirst("/swagger-ui/", "META-INF/resources/webjars/swagger-ui/5.20.7/");
+            if (resource.endsWith("/")) resource += "index.html";
+            var is = Thread.currentThread().getContextClassLoader().getResourceAsStream(resource);
+            if (is == null) {
+                rc.response().setStatusCode(404).end("Resource not found: " + resource);
+                return;
+            }
+            try (is) {
+                byte[] data = is.readAllBytes();
+                String contentType = reqPath.endsWith(".css") ? "text/css" :
+                                      reqPath.endsWith(".js") ? "application/javascript" :
+                                      reqPath.endsWith(".html") ? "text/html" :
+                                      reqPath.endsWith(".png") ? "image/png" :
+                                      reqPath.endsWith(".svg") ? "image/svg+xml" : "text/plain";
+                rc.response().putHeader("Content-Type", contentType).end(Buffer.buffer(data));
+            } catch (java.io.IOException e) {
+                rc.response().setStatusCode(500).end("Failed to read: " + resource);
+            }
+        });
 
         router.get("/docs").handler(ctx ->
             ctx.response()

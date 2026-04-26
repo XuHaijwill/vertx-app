@@ -175,4 +175,49 @@ public class ProductRepository {
         return DatabaseVerticle.query(vertx, sql, params)
             .map(DatabaseVerticle::toJsonList);
     }
+
+    /**
+     * Search with pagination
+     */
+    public Future<List<JsonObject>> searchPaginated(String keyword, String category, int page, int size) {
+        int offset = (page - 1) * size;
+        StringBuilder sql = new StringBuilder("SELECT * FROM products WHERE 1=1");
+        Tuple params = Tuple.tuple();
+        int paramIndex = 1;
+
+        if (keyword != null && !keyword.isEmpty()) {
+            sql.append(" AND LOWER(name) LIKE LOWER($").append(paramIndex++).append(")");
+            params.addString("%" + keyword + "%");
+        }
+        if (category != null && !category.isEmpty()) {
+            sql.append(" AND LOWER(category) = LOWER($").append(paramIndex++).append(")");
+            params.addString(category);
+        }
+        sql.append(" ORDER BY id LIMIT $").append(paramIndex++).append(" OFFSET $").append(paramIndex);
+        params.addInteger(size).addInteger(offset);
+
+        return DatabaseVerticle.query(vertx, sql.toString(), params)
+            .map(DatabaseVerticle::toJsonList);
+    }
+
+    /**
+     * Count search results (for pagination total)
+     */
+    public Future<Long> searchCount(String keyword, String category) {
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) as count FROM products WHERE 1=1");
+        Tuple params = Tuple.tuple();
+        int paramIndex = 1;
+
+        if (keyword != null && !keyword.isEmpty()) {
+            sql.append(" AND LOWER(name) LIKE LOWER($").append(paramIndex++).append(")");
+            params.addString("%" + keyword + "%");
+        }
+        if (category != null && !category.isEmpty()) {
+            sql.append(" AND LOWER(category) = LOWER($").append(paramIndex++).append(")");
+            params.addString(category);
+        }
+
+        return DatabaseVerticle.query(vertx, sql.toString(), params)
+            .map(rows -> rows.iterator().next().getLong("count"));
+    }
 }

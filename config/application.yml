@@ -9,7 +9,7 @@ app:
 
 # 数据库配置（公共默认值，profile 文件可覆盖）
 db:
-  host: 192.168.60.134
+  host: localhost
   port: 5432
   database: vertx
   user: postgres

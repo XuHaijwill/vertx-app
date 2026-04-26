@@ -118,7 +118,7 @@ curl http://localhost:8888/health
 ```json
 {
   "code": "success",
-  "message": "操作成功",
+  "message": "Operation successful",
   "data": {
     "status": "UP",
     "service": "my-vertx-app",
@@ -172,7 +172,7 @@ curl http://localhost:8888/api/users/1
 ```json
 {
   "code": "success",
-  "message": "操作成功",
+  "message": "Operation successful",
   "data": {
     "id": 1,
     "name": "Alice",

@@ -198,4 +198,18 @@ public class UserRepository {
         return DatabaseVerticle.query(vertx, sql, params)
             .map(DatabaseVerticle::toJsonList);
     }
+
+    /**
+     * Count search results (for pagination total)
+     */
+    public Future<Long> searchCount(String keyword) {
+        String sql = "SELECT COUNT(*) as count FROM users WHERE " +
+            "LOWER(name) LIKE LOWER($1) OR " +
+            "LOWER(email) LIKE LOWER($1) OR " +
+            "LOWER(department) LIKE LOWER($1)";
+        String pattern = "%" + keyword + "%";
+        Tuple params = Tuple.tuple().addString(pattern);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> rows.iterator().next().getLong("count"));
+    }
 }
