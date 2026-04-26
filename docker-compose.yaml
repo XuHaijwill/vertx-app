@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: myapp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: myapp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Vert.x Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: myapp-api
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      - HTTP_PORT=8888
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=myapp
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

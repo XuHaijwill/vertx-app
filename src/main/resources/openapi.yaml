@@ -1,0 +1,737 @@
+openapi: 3.0.3
+info:
+  title: My Vert.x REST API
+  description: |
+    A reactive, enterprise-grade REST API built with Eclipse Vert.x 4.x
+    
+    ## Features
+    - **RESTful API** - Clean, structured endpoints
+    - **PostgreSQL** - Reactive database operations
+    - **Health Checks** - Kubernetes-ready probes
+    - **Swagger UI** - Interactive API documentation
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8888
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Users
+    description: User management operations
+  - name: Products
+    description: Product management operations
+
+paths:
+  # ================================================================
+  # HEALTH ENDPOINTS
+  # ================================================================
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns the full health status of the application
+      operationId: getHealth
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                code: success
+                message: 操作成功
+                data:
+                  status: UP
+                  service: my-vertx-app
+                  version: 1.0.0
+                  timestamp: 1714112345678
+                  uptime: 5m 32s
+                  memory:
+                    total: 512MB
+                    used: 234MB
+                    free: 278MB
+                    percentage: 45.7%
+
+  /health/live:
+    get:
+      tags:
+        - Health
+      summary: Liveness probe
+      description: Kubernetes liveness probe - returns OK if the application is running
+      operationId: getLiveness
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: OK
+
+  /health/ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness probe
+      description: Kubernetes readiness probe - returns READY if the application is ready to serve traffic
+      operationId: getReadiness
+      responses:
+        '200':
+          description: Readiness status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: success
+                data:
+                  status: READY
+
+  # ================================================================
+  # USER ENDPOINTS
+  # ================================================================
+  /api/users:
+    get:
+      tags:
+        - Users
+      summary: List all users
+      description: Returns a list of all users in the system
+      operationId: listUsers
+      parameters:
+        - name: q
+          in: query
+          description: Search keyword (searches name, email, department)
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: Page number (1-based)
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: size
+          in: query
+          description: Page size
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsersResponse'
+              example:
+                code: success
+                message: 操作成功
+                data:
+                  - id: 1
+                    name: Alice
+                    email: alice@example.com
+                    age: 28
+                    department: Engineering
+                    status: active
+                    created_at: "2026-04-26T00:00:00Z"
+                  - id: 2
+                    name: Bob
+                    email: bob@example.com
+                    age: 32
+                    department: Product
+                    status: active
+                    created_at: "2026-04-26T00:00:00Z"
+    post:
+      tags:
+        - Users
+      summary: Create a new user
+      description: Creates a new user with the provided information
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+            example:
+              name: John Doe
+              email: john@example.com
+              age: 30
+              department: Engineering
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/users/{id}:
+    get:
+      tags:
+        - Users
+      summary: Get user by ID
+      description: Returns a single user by their ID
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User ID
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+        - Users
+      summary: Update user
+      description: Updates an existing user with the provided information
+      operationId: updateUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User ID
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+            example:
+              name: Alice Smith
+              age: 29
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - Users
+      summary: Delete user
+      description: Deletes a user by their ID
+      operationId: deleteUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User ID
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ================================================================
+  # PRODUCT ENDPOINTS
+  # ================================================================
+  /api/products:
+    get:
+      tags:
+        - Products
+      summary: List all products
+      description: Returns a list of all products
+      operationId: listProducts
+      parameters:
+        - name: q
+          in: query
+          description: Search keyword
+          required: false
+          schema:
+            type: string
+        - name: category
+          in: query
+          description: Filter by category
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of products
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductsResponse'
+              example:
+                code: success
+                data:
+                  - id: 1
+                    name: iPhone 15
+                    category: Electronics
+                    price: 799.99
+                    stock: 100
+                    status: active
+                    description: Apple smartphone
+                  - id: 2
+                    name: MacBook Pro
+                    category: Electronics
+                    price: 1999.99
+                    stock: 50
+                    status: active
+                    description: Apple laptop
+    post:
+      tags:
+        - Products
+      summary: Create a new product
+      description: Creates a new product with the provided information
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+            example:
+              name: iPad Pro
+              category: Electronics
+              price: 999.99
+              stock: 75
+              description: Apple tablet
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/products/{id}:
+    get:
+      tags:
+        - Products
+      summary: Get product by ID
+      operationId: getProductById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Product found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '404':
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+        - Products
+      summary: Update product
+      operationId: updateProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductRequest'
+      responses:
+        '200':
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '404':
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - Products
+      summary: Delete product
+      operationId: deleteProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Product deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ================================================================
+  # INFO ENDPOINT
+  # ================================================================
+  /api/info:
+    get:
+      tags:
+        - Info
+      summary: API info
+      description: Returns basic information about the API
+      operationId: getApiInfo
+      responses:
+        '200':
+          description: API information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InfoResponse'
+
+# ================================================================
+# COMPONENTS
+# ================================================================
+components:
+  schemas:
+    # Base schemas
+    ApiResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          example: success
+        message:
+          type: string
+          example: 操作成功
+        data:
+          type: object
+        timestamp:
+          type: integer
+          format: int64
+
+    HealthResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: UP
+                service:
+                  type: string
+                  example: my-vertx-app
+                version:
+                  type: string
+                  example: 1.0.0
+                timestamp:
+                  type: integer
+                  format: int64
+                uptime:
+                  type: string
+                  example: 5m 32s
+                memory:
+                  type: object
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+          example: User not found
+        timestamp:
+          type: integer
+          format: int64
+
+    InfoResponse:
+      type: object
+      properties:
+        code:
+          type: string
+        data:
+          type: object
+          properties:
+            name:
+              type: string
+            version:
+              type: string
+            java:
+              type: string
+            timestamp:
+              type: integer
+              format: int64
+
+    # User schemas
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: Alice
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        age:
+          type: integer
+          example: 28
+        department:
+          type: string
+          example: Engineering
+        status:
+          type: string
+          enum: [active, inactive]
+          example: active
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: John Doe
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        age:
+          type: integer
+          minimum: 0
+          maximum: 150
+          example: 30
+        department:
+          type: string
+          maxLength: 100
+          example: Engineering
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        email:
+          type: string
+          format: email
+        age:
+          type: integer
+          minimum: 0
+          maximum: 150
+        department:
+          type: string
+          maxLength: 100
+        status:
+          type: string
+          enum: [active, inactive]
+
+    UserResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/User'
+
+    UsersResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/User'
+
+    # Product schemas
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          example: iPhone 15
+        category:
+          type: string
+          example: Electronics
+        price:
+          type: number
+          format: decimal
+          example: 799.99
+        stock:
+          type: integer
+          example: 100
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateProductRequest:
+      type: object
+      required:
+        - name
+        - price
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          example: iPad Pro
+        category:
+          type: string
+          example: Electronics
+        price:
+          type: number
+          format: decimal
+          minimum: 0.01
+          example: 999.99
+        stock:
+          type: integer
+          minimum: 0
+          example: 75
+        description:
+          type: string
+          example: Apple tablet
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        category:
+          type: string
+        price:
+          type: number
+          format: decimal
+          minimum: 0.01
+        stock:
+          type: integer
+          minimum: 0
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+
+    ProductResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Product'
+
+    ProductsResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Product'

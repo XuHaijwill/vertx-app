@@ -1,0 +1,11 @@
+{
+  "http.port": 8888,
+  "db": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "myapp",
+    "user": "postgres",
+    "password": "postgres",
+    "poolSize": 10
+  }
+}
