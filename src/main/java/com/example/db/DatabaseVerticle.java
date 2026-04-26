@@ -13,6 +13,9 @@ import io.vertx.sqlclient.Tuple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -80,7 +83,8 @@ public class DatabaseVerticle extends AbstractVerticle {
 
         LOG.info("[DB] Connecting to PostgreSQL {}:{}/{}", host, port, database);
 
-        initializeTables()
+        // Run Flyway migrations BEFORE serving traffic
+        runMigrations(host, port, database, user, password, ssl)
             .compose(v -> {
                 context.put(DB_POOL, pool);
                 String connUri = String.format("postgresql://%s:%s@%s:%d/%s", user, password, host, port, database);
@@ -178,56 +182,21 @@ public class DatabaseVerticle extends AbstractVerticle {
     }
 
     // ================================================================
-    // Table initialization
+    // Flyway migration runner
     // ================================================================
 
-    private Future<Void> initializeTables() {
-        return executeSQL(
-                "CREATE TABLE IF NOT EXISTS users (" +
-                "id BIGSERIAL PRIMARY KEY," +
-                "name VARCHAR(100) NOT NULL," +
-                "email VARCHAR(255) NOT NULL UNIQUE," +
-                "age INTEGER," +
-                "department VARCHAR(100)," +
-                "status VARCHAR(20) DEFAULT 'active'," +
-                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
-                "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-            .compose(v -> executeSQL(
-                "CREATE TABLE IF NOT EXISTS products (" +
-                "id BIGSERIAL PRIMARY KEY," +
-                "name VARCHAR(200) NOT NULL," +
-                "category VARCHAR(100)," +
-                "price DECIMAL(10,2) NOT NULL," +
-                "stock INTEGER DEFAULT 0," +
-                "description TEXT," +
-                "status VARCHAR(20) DEFAULT 'active'," +
-                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
-                "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"))
-            .compose(v -> insertSampleData());
+    private Future<Void> runMigrations(String host, int port, String database,
+                                         String user, String password, boolean ssl) {
+        Promise<Void> p = Promise.promise();
+        FlywayMigration.migrate(host, port, database, user, password, ssl)
+            .onSuccess(v  -> { LOG.info("[DB] Migrations complete"); p.complete(); })
+            .onFailure(e -> { LOG.warn("[DB] Migration warning (non-fatal): {}", e.getMessage()); p.complete(); });
+        return p.future();
     }
 
-    private Future<Void> insertSampleData() {
-        return
-            executeSQL("INSERT INTO users (name,email,age,department,status) " +
-                "SELECT 'Alice','alice@example.com',28,'Engineering','active' " +
-                "WHERE NOT EXISTS (SELECT 1 FROM users WHERE email='alice@example.com')")
-            .compose(v -> executeSQL("INSERT INTO users (name,email,age,department,status) " +
-                "SELECT 'Bob','bob@example.com',32,'Product','active' " +
-                "WHERE NOT EXISTS (SELECT 1 FROM users WHERE email='bob@example.com')"))
-            .compose(v -> executeSQL("INSERT INTO users (name,email,age,department,status) " +
-                "SELECT 'Charlie','charlie@example.com',25,'Design','inactive' " +
-                "WHERE NOT EXISTS (SELECT 1 FROM users WHERE email='charlie@example.com')"))
-            .compose(v -> executeSQL("INSERT INTO products (name,category,price,stock,description,status) " +
-                "SELECT 'iPhone 15','Electronics',799.99,100,'Apple smartphone','active' " +
-                "WHERE NOT EXISTS (SELECT 1 FROM products WHERE name='iPhone 15')"))
-            .compose(v -> executeSQL("INSERT INTO products (name,category,price,stock,description,status) " +
-                "SELECT 'MacBook Pro','Electronics',1999.99,50,'Apple laptop','active' " +
-                "WHERE NOT EXISTS (SELECT 1 FROM products WHERE name='MacBook Pro')"))
-            .compose(v -> executeSQL("INSERT INTO products (name,category,price,stock,description,status) " +
-                "SELECT 'Coffee Maker','Home',49.99,200,'Automatic coffee maker','active' " +
-                "WHERE NOT EXISTS (SELECT 1 FROM products WHERE name='Coffee Maker')"))
-            .compose(v -> Future.succeededFuture());
-    }
+    // ================================================================
+    // SQL helpers (for dynamic queries, NOT table creation)
+    // ================================================================
 
     private Future<Void> executeSQL(String sql) {
         Promise<Void> p = Promise.promise();

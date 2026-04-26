@@ -120,6 +120,18 @@
             <version>5.11.4</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- Flyway Database Migration -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>11.10.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <version>11.10.2</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -142,6 +154,26 @@
                 <configuration>
                     <source>21</source>
                     <target>21</target>
+                </configuration>
+            </plugin>
+
+            <!-- Flyway Maven Plugin -->
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>11.10.2</version>
+                <configuration>
+                    <url>jdbc:postgresql://${flyway.host:-localhost}:${flyway.port:-5432}/${flyway.database:-vertx}</url>
+                    <user>${flyway.user:-postgres}</user>
+                    <password>${flyway.password:-postgres}</password>
+                    <locations>
+                        <location>filesystem:./config</location>
+                    </locations>
+                    <sqlMigrationPrefix>V</sqlMigrationPrefix>
+                    <sqlMigrationSeparator>__</sqlMigrationSeparator>
+                    <sqlMigrationSuffixes>.sql</sqlMigrationSuffixes>
+                    <baselineOnMigrate>true</baselineOnMigrate>
+                    <outOfOrder>false</outOfOrder>
                 </configuration>
             </plugin>
 
