@@ -92,7 +92,7 @@
         <dependency>
             <groupId>org.webjars</groupId>
             <artifactId>swagger-ui</artifactId>
-            <version>5.20.7</version>
+            <version>5.32.4</version>
         </dependency>
 
         <!-- Logging -->
@@ -104,7 +104,7 @@
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
-            <version>1.5.12</version>
+            <version>1.5.32</version>
         </dependency>
 
         <!-- Test Dependencies -->

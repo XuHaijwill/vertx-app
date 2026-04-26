@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: My Vert.x REST API
   description: |
-    A reactive, enterprise-grade REST API built with Eclipse Vert.x 4.x
+    A reactive, enterprise-grade REST API built with Eclipse Vert.x 5.x
     
     ## Features
     - **RESTful API** - Clean, structured endpoints
