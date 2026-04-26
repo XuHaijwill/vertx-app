@@ -56,6 +56,14 @@ public class Config {
     public static final String KEY_DB_POOL_SIZE = "db.pool-size";
     public static final String KEY_DB_SSL       = "db.ssl";
 
+    public static final String KEY_AUTH_ENABLED       = "auth.enabled";
+    public static final String KEY_AUTH_JWKS_URI      = "auth.jwks-uri";
+    public static final String KEY_AUTH_ISSUER         = "auth.issuer";
+    public static final String KEY_AUTH_CLIENT_ID      = "auth.client-id";
+    public static final String KEY_AUTH_AUDIENCE       = "auth.audience";
+    public static final String KEY_AUTH_REALM          = "auth.realm";
+    public static final String KEY_AUTH_SERVER_URL     = "auth.auth-server-url";
+
     public static final String PROFILE_DEV  = "DEV";
     public static final String PROFILE_UAT  = "UAT";
     public static final String PROFILE_PROD = "PROD";
@@ -284,5 +292,57 @@ public class Config {
 
     public static String getProfile(JsonObject config) {
         return config.getString(KEY_APP_PROFILE, "");
+    }
+
+    // ================================================================
+    // Auth accessors
+    // ================================================================
+
+    public static boolean isAuthEnabled(JsonObject config) {
+        JsonObject auth = config.getJsonObject("auth");
+        if (auth != null && auth.containsKey("enabled")) {
+            return auth.getBoolean("enabled");
+        }
+        return config.getBoolean(KEY_AUTH_ENABLED, false);
+    }
+
+    public static String getAuthJwksUri(JsonObject config) {
+        JsonObject auth = config.getJsonObject("auth");
+        if (auth != null && auth.containsKey("jwks-uri")) {
+            return auth.getString("jwks-uri");
+        }
+        return config.getString(KEY_AUTH_JWKS_URI, "");
+    }
+
+    public static String getAuthIssuer(JsonObject config) {
+        JsonObject auth = config.getJsonObject("auth");
+        if (auth != null && auth.containsKey("issuer")) {
+            return auth.getString("issuer");
+        }
+        return config.getString(KEY_AUTH_ISSUER, "");
+    }
+
+    public static String getAuthClientId(JsonObject config) {
+        JsonObject auth = config.getJsonObject("auth");
+        if (auth != null && auth.containsKey("client-id")) {
+            return auth.getString("client-id");
+        }
+        return config.getString(KEY_AUTH_CLIENT_ID, "");
+    }
+
+    public static String getAuthRealm(JsonObject config) {
+        JsonObject auth = config.getJsonObject("auth");
+        if (auth != null && auth.containsKey("realm")) {
+            return auth.getString("realm");
+        }
+        return config.getString(KEY_AUTH_REALM, "");
+    }
+
+    public static String getAuthServerUrl(JsonObject config) {
+        JsonObject auth = config.getJsonObject("auth");
+        if (auth != null && auth.containsKey("auth-server-url")) {
+            return auth.getString("auth-server-url");
+        }
+        return config.getString(KEY_AUTH_SERVER_URL, "");
     }
 }

@@ -88,6 +88,20 @@
             <version>${vertx.version}</version>
         </dependency>
 
+        <!-- Vert.x Auth - OAuth2 (Keycloak JWT validation via JWKS) -->
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-auth-oauth2</artifactId>
+            <version>${vertx.version}</version>
+        </dependency>
+
+        <!-- Vert.x Auth - JWT (token parsing & validation) -->
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-auth-jwt</artifactId>
+            <version>${vertx.version}</version>
+        </dependency>
+
         <!-- Swagger UI (webjar for StaticHandler) -->
         <dependency>
             <groupId>org.webjars</groupId>

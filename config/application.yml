@@ -16,3 +16,16 @@ db:
   password: 123456
   pool-size: 10
   ssl: false
+
+# Keycloak 认证配置（默认关闭，profile 文件中开启）
+auth:
+  enabled: false
+  realm: myrealm
+  auth-server-url: http://localhost:8180
+  client-id: vertx-app
+  audience: vertx-app
+  public-client: true
+  # jwks-uri 和 issuer 会从 auth-server-url + realm 自动推导，也可手动指定：
+  # jwks-uri: http://localhost:8180/realms/myrealm/protocol/openid-connect/certs
+  # issuer: http://localhost:8180/realms/myrealm
+  default-roles: user
