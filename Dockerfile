@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk-alpine AS builder
+﻿FROM eclipse-temurin:21-jdk-alpine AS builder
 
 WORKDIR /build
 
@@ -18,8 +18,11 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
-# Copy fat-jar
-COPY --from=builder /build/target/my-vertx-app-1.0.0-SNAPSHOT.jar app.jar
+# Copy fat-jar (maven-shade-plugin output)
+COPY --from=builder /build/target/vertx-app-1.0.0-SNAPSHOT.jar app.jar
+
+# Copy external config directory (Spring Boot style, outside the JAR)
+COPY config ./config
 
 # Create logs directory
 RUN mkdir -p logs

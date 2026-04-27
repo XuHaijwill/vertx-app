@@ -13,3 +13,13 @@ db:
   password: 123456
   pool-size: 10
   ssl: false
+
+# DEV 环境 Keycloak 配置
+auth:
+  enabled: true
+  realm: myrealm
+  auth-server-url: http://192.168.60.134:8180
+  client-id: vertx-app
+  audience: vertx-app
+  public-client: true
+  default-roles: user

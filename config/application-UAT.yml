@@ -14,3 +14,13 @@ db:
   password: uat_password
   pool-size: 20
   ssl: true
+
+# UAT 环境 Keycloak 配置
+auth:
+  enabled: true
+  realm: uat
+  auth-server-url: https://keycloak-uat.example.com
+  client-id: vertx-app
+  audience: vertx-app
+  public-client: true
+  default-roles: user

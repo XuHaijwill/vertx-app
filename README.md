@@ -1,6 +1,6 @@
 # My Vert.x Application 🚀
 
-A reactive, enterprise-grade REST API built with Eclipse Vert.x 4.x
+A reactive, enterprise-grade REST API built with Eclipse Vert.x 5.x
 
 ## ✨ Features
 

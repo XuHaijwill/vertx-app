@@ -1,6 +1,7 @@
 package com.example;
 
 import io.vertx.core.Vertx;
+import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientOptions;
 import io.vertx.junit5.VertxExtension;
@@ -40,20 +41,26 @@ class MainVerticleTest {
             .onComplete(testContext.succeeding(response -> {
                 testContext.verify(() -> {
                     assertEquals(200, response.statusCode());
-                    assertTrue(response.bodyAsString().contains("UP"));
+                    JsonObject body = response.bodyAsJsonObject();
+                    // Response is wrapped in ApiResponse: {code, message, data}
+                    assertEquals("success", body.getString("code"));
+                    JsonObject data = body.getJsonObject("data");
+                    assertEquals("UP", data.getString("status"));
                     testContext.completeNow();
                 });
             }));
     }
 
     @Test
-    void testHelloEndpoint(Vertx vertx, VertxTestContext testContext) {
-        webClient.get("/api/hello")
+    void testAuthConfigEndpoint(Vertx vertx, VertxTestContext testContext) {
+        webClient.get("/api/auth/config")
             .send()
             .onComplete(testContext.succeeding(response -> {
                 testContext.verify(() -> {
                     assertEquals(200, response.statusCode());
-                    assertTrue(response.bodyAsString().contains("Hello"));
+                    JsonObject body = response.bodyAsJsonObject();
+                    // Auth config should be returned (enabled=false by default in tests)
+                    assertNotNull(body.getJsonObject("data"));
                     testContext.completeNow();
                 });
             }));
@@ -66,7 +73,12 @@ class MainVerticleTest {
             .onComplete(testContext.succeeding(response -> {
                 testContext.verify(() -> {
                     assertEquals(200, response.statusCode());
-                    assertNotNull(response.bodyAsJsonArray());
+                    JsonObject body = response.bodyAsJsonObject();
+                    assertEquals("success", body.getString("code"));
+                    // Response is paginated: {list, total, page, size, pages}
+                    JsonObject data = body.getJsonObject("data");
+                    assertNotNull(data.getJsonArray("list"));
+                    assertTrue(data.getLong("total") >= 0);
                     testContext.completeNow();
                 });
             }));
@@ -74,15 +86,17 @@ class MainVerticleTest {
 
     @Test
     void testCreateUser(Vertx vertx, VertxTestContext testContext) {
-        var userJson = new io.vertx.core.json.JsonObject()
+        var userJson = new JsonObject()
             .put("name", "Test User")
-            .put("email", "test@example.com");
+            .put("email", "test-" + System.currentTimeMillis() + "@example.com");
 
         webClient.post("/api/users")
             .sendJsonObject(userJson)
             .onComplete(testContext.succeeding(response -> {
                 testContext.verify(() -> {
                     assertEquals(201, response.statusCode());
+                    JsonObject body = response.bodyAsJsonObject();
+                    assertEquals("success", body.getString("code"));
                     testContext.completeNow();
                 });
             }));

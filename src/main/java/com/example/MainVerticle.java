@@ -1,6 +1,8 @@
 package com.example;
 
 import com.example.api.*;
+import com.example.auth.AuthConfig;
+import com.example.auth.KeycloakAuthHandler;
 import com.example.core.ApiResponse;
 import com.example.core.Config;
 import io.vertx.core.AbstractVerticle;
@@ -81,20 +83,72 @@ public class MainVerticle extends AbstractVerticle {
         Router router = Router.router(vertx);
 
         addGlobalHandlers(router);
-        registerApis(router);
-        addErrorHandlers(router);
 
-        LOG.info("[OK] Router created");
-        return Future.succeededFuture(router);
+        // Setup Keycloak auth if enabled
+        return setupAuth(router)
+            .map(authHandler -> {
+                registerApis(router, authHandler);
+                addErrorHandlers(router);
+                LOG.info("[OK] Router created");
+                return router;
+            });
+    }
+
+    /**
+     * Setup Keycloak JWT authentication handler if auth is enabled.
+     * Returns null handler if auth is disabled.
+     */
+    private Future<KeycloakAuthHandler> setupAuth(Router router) {
+        AuthConfig authConfig = AuthConfig.from(config());
+
+        if (!authConfig.isEnabled()) {
+            LOG.info("[AUTH] Authentication disabled — all endpoints are open");
+            return Future.succeededFuture(null);
+        }
+
+        LOG.info("[AUTH] Authentication enabled — issuer={}, clientId={}",
+            authConfig.getIssuer(), authConfig.getClientId());
+
+        // Paths that skip authentication
+        Set<String> skipPaths = Set.of(
+            "/health",
+            "/health/",
+            "/docs",
+            "/swagger-ui/",
+            "/openapi.yaml",
+            "/api/auth/config",
+            "/api/info"
+        );
+
+        return KeycloakAuthHandler.create(vertx, authConfig, skipPaths)
+            .onSuccess(handler -> {
+                // Apply auth handler to /api/* routes (excluding auth/config)
+                router.route("/api/*").handler(handler);
+                LOG.info("[AUTH] Keycloak auth handler installed on /api/*");
+            })
+            .onFailure(err -> {
+                LOG.error("[AUTH] Failed to setup Keycloak auth: {}", err.getMessage());
+                LOG.warn("[AUTH] Continuing without authentication");
+            })
+            .recover(err -> Future.succeededFuture(null));
     }
 
     /** Register all API modules. Add new API classes here. */
-    private void registerApis(Router router) {
+    private void registerApis(Router router, KeycloakAuthHandler authHandler) {
+        AuthConfig authConfig = AuthConfig.from(config());
+
         new HealthApi(vertx).registerRoutes(router);
         new UserApi(vertx).registerRoutes(router);
         new ProductApi(vertx).registerRoutes(router);
         new DocsApi(vertx).registerRoutes(router);
-        LOG.info("[OK] APIs registered: Health, User, Product, Docs");
+        new AuthApi(vertx, authConfig).registerRoutes(router);
+
+        // Example: Role-based route protection
+        // Uncomment to require 'admin' role for DELETE endpoints:
+        // router.delete("/api/users/:id").handler(KeycloakAuthHandler.requireRole("admin"));
+        // router.delete("/api/products/:id").handler(KeycloakAuthHandler.requireRole("admin"));
+
+        LOG.info("[OK] APIs registered: Health, User, Product, Docs, Auth");
     }
 
     // ================================================================
