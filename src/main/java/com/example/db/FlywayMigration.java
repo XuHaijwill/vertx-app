@@ -94,6 +94,53 @@ public class FlywayMigration {
     }
 
     /**
+     * Synchronous version of migrate() that runs Flyway.migrate() on the current thread.
+     * This is useful when the caller runs migrations from a worker thread or Callable.
+     *
+     * @throws Exception when migration fails
+     */
+    public static void migrateSync(
+            String host, int port, String database,
+            String user, String password, boolean ssl) throws Exception {
+
+        String jdbcUrl = String.format(
+            "jdbc:postgresql://%s:%d/%s?sslmode=%s",
+            host, port, database,
+            ssl ? "require" : "disable"
+        );
+
+        LOG.info("[Flyway] Connecting to {} to check migrations...", jdbcUrl);
+
+        Flyway flyway = Flyway.configure()
+            // Load migrations from classpath: db/migration/
+            .dataSource(jdbcUrl, user, password)
+            // Also scan ./config directory (for dev, outside JAR)
+            .locations(
+                "classpath:db/migration",
+                "filesystem:./config"
+            )
+            .sqlMigrationPrefix("V")
+            .sqlMigrationSeparator("__")
+            .sqlMigrationSuffixes(".sql")
+            // If DB is fresh (no flyway_schema_history), create baseline
+            .baselineOnMigrate(true)
+            .baselineVersion("0")
+            .outOfOrder(false)
+            .validateOnMigrate(true)
+            .cleanDisabled(true)   // NEVER run clean in production
+            .load();
+
+        var result = flyway.migrate();
+
+        if (result.migrationsExecuted > 0) {
+            LOG.info("[Flyway] ✅ Applied {} migration(s) (db={})",
+                result.migrationsExecuted, database);
+        } else {
+            LOG.info("[Flyway] No pending migrations (database is up-to-date)");
+        }
+    }
+
+    /**
      * Convenience overload using a merged config JsonObject.
      */
     public static Future<Void> migrate(JsonObject config) {

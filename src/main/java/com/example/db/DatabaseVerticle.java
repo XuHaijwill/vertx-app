@@ -187,10 +187,23 @@ public class DatabaseVerticle extends AbstractVerticle {
 
     private Future<Void> runMigrations(String host, int port, String database,
                                          String user, String password, boolean ssl) {
+        // Run Flyway migrations on a worker thread to avoid blocking the event-loop
         Promise<Void> p = Promise.promise();
-        FlywayMigration.migrate(host, port, database, user, password, ssl)
-            .onSuccess(v  -> { LOG.info("[DB] Migrations complete"); p.complete(); })
-            .onFailure(e -> { LOG.warn("[DB] Migration warning (non-fatal): {}", e.getMessage()); p.complete(); });
+        // Use the Callable-based executeBlocking overload that returns a Future
+        var migrationFuture = vertx.executeBlocking((java.util.concurrent.Callable<Void>) () -> {
+            // This runs on a worker thread; call the synchronous migration helper which may throw
+            FlywayMigration.migrateSync(host, port, database, user, password, ssl);
+            return null;
+        });
+
+        migrationFuture.onSuccess(v -> {
+            LOG.info("[DB] Migrations complete");
+            p.complete();
+        }).onFailure(err -> {
+            LOG.warn("[DB] Migration warning (non-fatal): {}", err != null ? err.getMessage() : "unknown");
+            p.complete();
+        });
+
         return p.future();
     }
 
