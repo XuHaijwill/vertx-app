@@ -14,3 +14,13 @@ db:
   password: ${DB_PASSWORD}
   pool-size: 50
   ssl: true
+
+# PROD 环境 Keycloak 配置
+auth:
+  enabled: true
+  realm: prod
+  auth-server-url: https://keycloak.example.com
+  client-id: vertx-app
+  audience: vertx-app
+  public-client: true
+  default-roles: user

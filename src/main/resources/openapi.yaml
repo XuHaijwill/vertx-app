@@ -28,8 +28,93 @@ tags:
     description: User management operations
   - name: Products
     description: Product management operations
+  - name: Auth
+    description: Authentication and authorization endpoints
 
 paths:
+  # ================================================================
+  # AUTH ENDPOINTS
+  # ================================================================
+  /api/auth/config:
+    get:
+      tags:
+        - Auth
+      summary: Get Keycloak client config
+      description: Returns public Keycloak configuration for frontend initialization (no secrets exposed)
+      operationId: getAuthConfig
+      responses:
+        '200':
+          description: Keycloak public configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: success
+                data:
+                  enabled: true
+                  realm: myrealm
+                  clientId: vertx-app
+                  authServerUrl: http://localhost:8180
+
+  /api/auth/me:
+    get:
+      tags:
+        - Auth
+      summary: Get current user
+      description: Returns the current authenticated user info extracted from the JWT Bearer token
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: success
+                data:
+                  authenticated: true
+                  username: john.doe
+                  roles:
+                    - user
+                    - realm:user
+                  email: john@example.com
+        '401':
+          description: Unauthorized - missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: Get logout URL
+      description: Returns the Keycloak logout URL for the frontend to redirect to
+      operationId: authLogout
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                redirect_uri:
+                  type: string
+                  description: URL to redirect after logout
+                  example: http://localhost:3000
+      responses:
+        '200':
+          description: Logout URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
   # ================================================================
   # HEALTH ENDPOINTS
   # ================================================================
@@ -162,6 +247,8 @@ paths:
       summary: Create a new user
       description: Creates a new user with the provided information
       operationId: createUser
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -227,6 +314,8 @@ paths:
       summary: Update user
       description: Updates an existing user with the provided information
       operationId: updateUser
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -263,6 +352,8 @@ paths:
       summary: Delete user
       description: Deletes a user by their ID
       operationId: deleteUser
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -338,6 +429,8 @@ paths:
       summary: Create a new product
       description: Creates a new product with the provided information
       operationId: createProduct
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -395,6 +488,8 @@ paths:
         - Products
       summary: Update product
       operationId: updateProduct
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -426,6 +521,8 @@ paths:
         - Products
       summary: Delete product
       operationId: deleteProduct
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -469,6 +566,12 @@ paths:
 # COMPONENTS
 # ================================================================
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Keycloak JWT access token. Obtain from http://localhost:8180/realms/myrealm/protocol/openid-connect/token"
   schemas:
     # Base schemas
     ApiResponse:

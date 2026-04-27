@@ -35,8 +35,23 @@ public class HealthApi extends BaseApi {
             .put("timestamp", System.currentTimeMillis())
             .put("uptime", getUptime())
             .put("memory", getMemoryInfo())
-            .put("database", DatabaseVerticle.getPool(vertx) != null ? "connected" : "demo-mode");
+            .put("database", DatabaseVerticle.getPool(vertx) != null ? "connected" : "demo-mode")
+            .put("auth", getAuthInfo(ctx));
         ok(ctx, health);
+    }
+
+    private JsonObject getAuthInfo(RoutingContext ctx) {
+        var cfg = ctx.vertx().getOrCreateContext().config();
+        boolean authEnabled = Config.isAuthEnabled(cfg);
+        JsonObject authInfo = new JsonObject()
+            .put("enabled", authEnabled);
+        if (authEnabled) {
+            authInfo
+                .put("realm", Config.getAuthRealm(cfg))
+                .put("clientId", Config.getAuthClientId(cfg))
+                .put("issuer", Config.getAuthIssuer(cfg));
+        }
+        return authInfo;
     }
 
     private void liveness(RoutingContext ctx) {
