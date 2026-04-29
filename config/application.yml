@@ -30,3 +30,9 @@ auth:
   # jwks-uri: http://localhost:8180/realms/myrealm/protocol/openid-connect/certs
   # issuer: http://localhost:8180/realms/myrealm
   default-roles: user
+
+# 定时任务调度器配置
+scheduler:
+  enabled: true
+  poll-seconds: 30        # DB 轮询间隔（秒）
+  http-timeout-seconds: 60  # HTTP 任务超时（秒）

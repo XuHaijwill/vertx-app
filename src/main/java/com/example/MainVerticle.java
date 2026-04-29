@@ -5,6 +5,7 @@ import com.example.auth.AuthConfig;
 import com.example.auth.KeycloakAuthHandler;
 import com.example.core.ApiResponse;
 import com.example.core.Config;
+import com.example.verticles.SchedulerVerticle;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpMethod;
@@ -44,6 +45,7 @@ public class MainVerticle extends AbstractVerticle {
     @Override
     public void start(Promise<Void> startPromise) {
         deployDatabaseVerticle()
+            .compose(v -> deploySchedulerVerticle())
             .compose(v -> createRouter())
             .compose(router -> startServer(router))
             .onSuccess(port -> printBanner(port))
@@ -72,6 +74,19 @@ public class MainVerticle extends AbstractVerticle {
                 new io.vertx.core.DeploymentOptions().setConfig(config()))
             .onSuccess(id -> { LOG.info("[OK] DatabaseVerticle deployed"); p.complete(); })
             .onFailure(err -> { LOG.warn("[WARN] DatabaseVerticle failed — demo mode: {}", err.getMessage()); p.complete(); });
+        return p.future();
+    }
+
+    private Future<Void> deploySchedulerVerticle() {
+        if (!Config.isSchedulerEnabled(config())) {
+            LOG.info("[SCHEDULER] Disabled via config");
+            return Future.succeededFuture();
+        }
+        Promise<Void> p = Promise.promise();
+        vertx.deployVerticle("com.example.verticles.SchedulerVerticle",
+                new io.vertx.core.DeploymentOptions().setConfig(config()))
+            .onSuccess(id -> { LOG.info("[OK] SchedulerVerticle deployed"); p.complete(); })
+            .onFailure(err -> { LOG.warn("[WARN] SchedulerVerticle failed — continuing: {}", err.getMessage()); p.complete(); });
         return p.future();
     }
 

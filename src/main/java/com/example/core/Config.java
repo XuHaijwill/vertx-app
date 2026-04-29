@@ -65,6 +65,10 @@ public class Config {
     public static final String KEY_AUTH_REALM          = "auth.realm";
     public static final String KEY_AUTH_SERVER_URL     = "auth.auth-server-url";
 
+    public static final String KEY_SCHEDULER_ENABLED         = "scheduler.enabled";
+    public static final String KEY_SCHEDULER_POLL_SECS       = "scheduler.poll-seconds";
+    public static final String KEY_SCHEDULER_HTTP_TIMEOUT_SECS = "scheduler.http-timeout-seconds";
+
     public static final String PROFILE_DEV  = "DEV";
     public static final String PROFILE_UAT  = "UAT";
     public static final String PROFILE_PROD = "PROD";
@@ -359,5 +363,33 @@ public class Config {
             return auth.getString("auth-server-url");
         }
         return config.getString(KEY_AUTH_SERVER_URL, "");
+    }
+
+    // ================================================================
+    // Scheduler accessors
+    // ================================================================
+
+    public static boolean isSchedulerEnabled(JsonObject config) {
+        JsonObject scheduler = config.getJsonObject("scheduler");
+        if (scheduler != null && scheduler.containsKey("enabled")) {
+            return scheduler.getBoolean("enabled");
+        }
+        return config.getBoolean(KEY_SCHEDULER_ENABLED, true);
+    }
+
+    public static int getSchedulerPollSeconds(JsonObject config) {
+        JsonObject scheduler = config.getJsonObject("scheduler");
+        if (scheduler != null && scheduler.containsKey("poll-seconds")) {
+            return scheduler.getInteger("poll-seconds");
+        }
+        return config.getInteger(KEY_SCHEDULER_POLL_SECS, 30);
+    }
+
+    public static int getSchedulerHttpTimeoutSeconds(JsonObject config) {
+        JsonObject scheduler = config.getJsonObject("scheduler");
+        if (scheduler != null && scheduler.containsKey("http-timeout-seconds")) {
+            return scheduler.getInteger("http-timeout-seconds");
+        }
+        return config.getInteger(KEY_SCHEDULER_HTTP_TIMEOUT_SECS, 60);
     }
 }

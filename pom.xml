@@ -146,6 +146,13 @@
             <artifactId>flyway-database-postgresql</artifactId>
             <version>11.10.2</version>
         </dependency>
+
+        <!-- cron-utils for cron expression parsing -->
+        <dependency>
+            <groupId>com.cronutils</groupId>
+            <artifactId>cron-utils</artifactId>
+            <version>9.2.1</version>
+        </dependency>
     </dependencies>
 
     <build>
