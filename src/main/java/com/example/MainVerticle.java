@@ -133,7 +133,10 @@ public class MainVerticle extends AbstractVerticle {
             contextPath + "/swagger-ui/",
             contextPath + "/openapi.yaml",
             contextPath + "/api/auth/config",
-            contextPath + "/api/info"
+            contextPath + "/api/info",
+            // User API 白名单（方便测试）
+            contextPath + "/api/users",
+            contextPath + "/api/users/"
         ));
 
         return KeycloakAuthHandler.create(vertx, authConfig, skipPaths)

@@ -13,12 +13,12 @@ import io.vertx.sqlclient.Tuple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
-
+import java.util.function.Function;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+
+import io.vertx.sqlclient.Transaction;
 
 /**
  * Database Verticle — PostgreSQL connection pool manager.
@@ -151,6 +151,60 @@ public class DatabaseVerticle extends AbstractVerticle {
 
     public static Future<RowSet<Row>> query(Vertx vertx, String sql) {
         return query(vertx, sql, Tuple.tuple());
+    }
+
+    // ================================================================
+    // Transactional operations
+    // ================================================================
+
+    /**
+     * Execute a series of database operations within a transaction.
+     *
+     * <p>All operations succeed  → transaction is committed automatically.
+     * Any operation fails       → transaction is rolled back automatically.
+     * The transaction is always closed at the end.
+     *
+     * <p>Usage example:
+     * <pre>
+     * return DatabaseVerticle.withTransaction(vertx, tx -&gt;
+     *     tx.preparedQuery("INSERT INTO orders ...").execute(params1)
+     *       .compose(r1 -&gt; tx.preparedQuery("INSERT INTO items ...").execute(params2))
+     *       .map(r2 -&gt; r2.iterator().next().getLong("id"))
+     * );
+     * </pre>
+     *
+     * @param vertx  Vert.x instance
+     * @param block  Lambda receiving the Transaction; return a Future representing the work.
+     *               The block must NOT call commit() or rollback() itself — that is
+     *               handled automatically based on the returned Future's outcome.
+     * @param <T>    Result type of the transaction
+     * @return Future that completes with the block's result or fails if any step fails
+     */
+    public static <T> Future<T> withTransaction(Vertx vertx,
+                                                  Function<Transaction, Future<T>> block) {
+        Pool pool = getPool(vertx);
+        if (pool == null) {
+            return Future.failedFuture("Database not available (demo mode)");
+        }
+
+        return pool.getConnection()
+            .compose(conn ->
+                conn.begin()
+                    .compose(tx ->
+                        block.apply(tx)
+                            .compose(
+                                result -> tx.commit()
+                                    .onComplete(ar -> conn.close())
+                                    .map(result),
+                                err -> tx.rollback()
+                                    .onComplete(ar -> conn.close())
+                                    .compose(v -> Future.<T>failedFuture(err))
+                            )
+                    )
+                    .onFailure(err -> conn.close())
+            )
+            .onFailure(err ->
+                LOG.error("[DB-TX] Transaction failed and was rolled back: {}", err.getMessage()));
     }
 
     public static List<JsonObject> toJsonList(RowSet<Row> rows) {
