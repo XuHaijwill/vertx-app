@@ -22,12 +22,12 @@ public class UserApi extends BaseApi {
     }
 
     @Override
-    public void registerRoutes(Router router) {
-        router.get("/api/users").handler(this::listOrSearch);
-        router.get("/api/users/:id").handler(this::getById);
-        router.post("/api/users").handler(this::create);
-        router.put("/api/users/:id").handler(this::update);
-        router.delete("/api/users/:id").handler(this::delete);
+    public void registerRoutes(Router router, String contextPath) {
+        router.get(contextPath + "/api/users").handler(this::listOrSearch);
+        router.get(contextPath + "/api/users/:id").handler(this::getById);
+        router.post(contextPath + "/api/users").handler(this::create);
+        router.put(contextPath + "/api/users/:id").handler(this::update);
+        router.delete(contextPath + "/api/users/:id").handler(this::delete);
     }
 
     private void listOrSearch(RoutingContext ctx) {

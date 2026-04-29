@@ -26,10 +26,10 @@ public class AuthApi extends BaseApi {
     }
 
     @Override
-    public void registerRoutes(Router router) {
-        router.get("/api/auth/config").handler(this::getPublicConfig);
-        router.get("/api/auth/me").handler(this::getCurrentUser);
-        router.post("/api/auth/logout").handler(this::logout);
+    public void registerRoutes(Router router, String contextPath) {
+        router.get(contextPath + "/api/auth/config").handler(this::getPublicConfig);
+        router.get(contextPath + "/api/auth/me").handler(this::getCurrentUser);
+        router.post(contextPath + "/api/auth/logout").handler(this::logout);
     }
 
     /**

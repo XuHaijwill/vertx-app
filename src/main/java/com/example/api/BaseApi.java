@@ -25,9 +25,10 @@ public abstract class BaseApi {
 
     /**
      * Register all routes for this API module.
-     * Called once during router setup.
+     * @param router       the router to register routes on
+     * @param contextPath  the URL prefix (e.g. "" or "/support"), never null
      */
-    public abstract void registerRoutes(Router router);
+    public abstract void registerRoutes(Router router, String contextPath);
 
     // ================================================================
     // Response helpers

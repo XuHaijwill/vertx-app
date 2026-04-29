@@ -81,16 +81,13 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
             .setSite(authConfig.getIssuer())
             .setJWTOptions(new JWTOptions()
                 .setIssuer(authConfig.getIssuer())
+                // Only accept RS256 algorithm — avoids "Unsupported JWK: RSA-OAEP" error.
+                .setAlgorithm("RS256")
             );
 
         // Set audience if configured
         if (authConfig.getAudience() != null && !authConfig.getAudience().isEmpty()) {
             oauth2Options.getJWTOptions().setAudience(List.of(authConfig.getAudience()));
-        }
-
-        // Configure JWKS key rotation
-        if (!authConfig.getJwksUri().isEmpty()) {
-            oauth2Options.setJwkPath(authConfig.getJwksUri());
         }
 
         OAuth2Auth oauth2 = OAuth2Auth.create(vertx, oauth2Options);

@@ -20,10 +20,10 @@ public class HealthApi extends BaseApi {
     }
 
     @Override
-    public void registerRoutes(Router router) {
-        router.get("/health").handler(this::health);
-        router.get("/health/live").handler(this::liveness);
-        router.get("/health/ready").handler(this::readiness);
+    public void registerRoutes(Router router, String contextPath) {
+        router.get(contextPath + "/health").handler(this::health);
+        router.get(contextPath + "/health/live").handler(this::liveness);
+        router.get(contextPath + "/health/ready").handler(this::readiness);
     }
 
     private void health(RoutingContext ctx) {

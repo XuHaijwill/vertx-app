@@ -81,15 +81,16 @@ public class MainVerticle extends AbstractVerticle {
 
     private Future<Router> createRouter() {
         Router router = Router.router(vertx);
+        String contextPath = Config.getContextPath(config());
 
         addGlobalHandlers(router);
 
         // Setup Keycloak auth if enabled
-        return setupAuth(router)
+        return setupAuth(router, contextPath)
             .map(authHandler -> {
-                registerApis(router, authHandler);
+                registerApis(router, authHandler, contextPath);
                 addErrorHandlers(router);
-                LOG.info("[OK] Router created");
+                LOG.info("[OK] Router created with context-path: '{}'", contextPath);
                 return router;
             });
     }
@@ -98,7 +99,7 @@ public class MainVerticle extends AbstractVerticle {
      * Setup Keycloak JWT authentication handler if auth is enabled.
      * Returns null handler if auth is disabled.
      */
-    private Future<KeycloakAuthHandler> setupAuth(Router router) {
+    private Future<KeycloakAuthHandler> setupAuth(Router router, String contextPath) {
         AuthConfig authConfig = AuthConfig.from(config());
 
         if (!authConfig.isEnabled()) {
@@ -109,22 +110,22 @@ public class MainVerticle extends AbstractVerticle {
         LOG.info("[AUTH] Authentication enabled — issuer={}, clientId={}",
             authConfig.getIssuer(), authConfig.getClientId());
 
-        // Paths that skip authentication
-        Set<String> skipPaths = Set.of(
-            "/health",
-            "/health/",
-            "/docs",
-            "/swagger-ui/",
-            "/openapi.yaml",
-            "/api/auth/config",
-            "/api/info"
-        );
+        // Paths that skip authentication (加上 context-path 前缀)
+        Set<String> skipPaths = new HashSet<>(java.util.Arrays.asList(
+            contextPath + "/health",
+            contextPath + "/health/",
+            contextPath + "/docs",
+            contextPath + "/swagger-ui/",
+            contextPath + "/openapi.yaml",
+            contextPath + "/api/auth/config",
+            contextPath + "/api/info"
+        ));
 
         return KeycloakAuthHandler.create(vertx, authConfig, skipPaths)
             .onSuccess(handler -> {
-                // Apply auth handler to /api/* routes (excluding auth/config)
-                router.route("/api/*").handler(handler);
-                LOG.info("[AUTH] Keycloak auth handler installed on /api/*");
+                // Apply auth handler to /api/* routes under context-path
+                router.route(contextPath + "/api/*").handler(handler);
+                LOG.info("[AUTH] Keycloak auth handler installed on {}/api/*", contextPath);
             })
             .onFailure(err -> {
                 LOG.error("[AUTH] Failed to setup Keycloak auth: {}", err.getMessage());
@@ -134,19 +135,14 @@ public class MainVerticle extends AbstractVerticle {
     }
 
     /** Register all API modules. Add new API classes here. */
-    private void registerApis(Router router, KeycloakAuthHandler authHandler) {
+    private void registerApis(Router router, KeycloakAuthHandler authHandler, String contextPath) {
         AuthConfig authConfig = AuthConfig.from(config());
 
-        new HealthApi(vertx).registerRoutes(router);
-        new UserApi(vertx).registerRoutes(router);
-        new ProductApi(vertx).registerRoutes(router);
-        new DocsApi(vertx).registerRoutes(router);
-        new AuthApi(vertx, authConfig).registerRoutes(router);
-
-        // Example: Role-based route protection
-        // Uncomment to require 'admin' role for DELETE endpoints:
-        // router.delete("/api/users/:id").handler(KeycloakAuthHandler.requireRole("admin"));
-        // router.delete("/api/products/:id").handler(KeycloakAuthHandler.requireRole("admin"));
+        new HealthApi(vertx).registerRoutes(router, contextPath);
+        new UserApi(vertx).registerRoutes(router, contextPath);
+        new ProductApi(vertx).registerRoutes(router, contextPath);
+        new DocsApi(vertx).registerRoutes(router, contextPath);
+        new AuthApi(vertx, authConfig).registerRoutes(router, contextPath);
 
         LOG.info("[OK] APIs registered: Health, User, Product, Docs, Auth");
     }
@@ -233,19 +229,27 @@ public class MainVerticle extends AbstractVerticle {
         var cfg = config();
         String profile = Config.getProfile(cfg);
         String dbStatus = com.example.db.DatabaseVerticle.getPool(vertx) != null ? "connected" : "demo-mode";
+        String contextPath = Config.getContextPath(cfg);
+        String baseUrl = "http://localhost:" + port + contextPath;
+
         LOG.info("+============================================================+");
         LOG.info("+            VERT.X APPLICATION STARTED                     +");
         LOG.info("+------------------------------------------------------------+");
-        LOG.info("+  HTTP:      http://localhost:{}/                           +", port);
-        LOG.info("+  Health:    http://localhost:{}/health                     +", port);
-        LOG.info("+  Users:     http://localhost:{}/api/users                  +", port);
-        LOG.info("+  Products:  http://localhost:{}/api/products              +", port);
-        LOG.info("+  Swagger:   http://localhost:{}/docs                      +", port);
+        LOG.info("+  HTTP:      {}   +", padRight(baseUrl + "/", 44));
+        LOG.info("+  Health:    {}/health                     +", baseUrl);
+        LOG.info("+  Users:     {}/api/users                  +", baseUrl);
+        LOG.info("+  Products:  {}/api/products              +", baseUrl);
+        LOG.info("+  Swagger:   {}/docs                      +", baseUrl);
         LOG.info("+------------------------------------------------------------+");
         LOG.info("+  Profile:   {}  |  DB: {}  |  Java: {}        +",
-            profile.isEmpty() ? "(default)" : profile,
-            dbStatus,
+            padRight(profile.isEmpty() ? "(default)" : profile, 10), dbStatus,
             System.getProperty("java.version"));
+        LOG.info("+  Context:   {}                                 +", contextPath.isEmpty() ? "(none)" : contextPath);
         LOG.info("+============================================================+");
+    }
+
+    private static String padRight(String s, int len) {
+        if (s.length() >= len) return s;
+        return s + " ".repeat(len - s.length());
     }
 }

@@ -20,12 +20,12 @@ public class ProductApi extends BaseApi {
     }
 
     @Override
-    public void registerRoutes(Router router) {
-        router.get("/api/products").handler(this::listOrSearch);
-        router.get("/api/products/:id").handler(this::getById);
-        router.post("/api/products").handler(this::create);
-        router.put("/api/products/:id").handler(this::update);
-        router.delete("/api/products/:id").handler(this::delete);
+    public void registerRoutes(Router router, String contextPath) {
+        router.get(contextPath + "/api/products").handler(this::listOrSearch);
+        router.get(contextPath + "/api/products/:id").handler(this::getById);
+        router.post(contextPath + "/api/products").handler(this::create);
+        router.put(contextPath + "/api/products/:id").handler(this::update);
+        router.delete(contextPath + "/api/products/:id").handler(this::delete);
     }
 
     private void listOrSearch(RoutingContext ctx) {

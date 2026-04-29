@@ -45,8 +45,9 @@ public class Config {
 
     // Config key constants
     public static final String KEY_APP_PROFILE  = "app.profile";
-    public static final String KEY_APP_NAME      = "app.name";
-    public static final String KEY_APP_HTTP_PORT = "app.http-port";
+    public static final String KEY_APP_NAME       = "app.name";
+    public static final String KEY_APP_HTTP_PORT  = "app.http-port";
+    public static final String KEY_APP_CONTEXT_PATH = "app.context-path";
 
     public static final String KEY_DB_HOST      = "db.host";
     public static final String KEY_DB_PORT      = "db.port";
@@ -288,6 +289,20 @@ public class Config {
             return db.getBoolean("ssl");
         }
         return config.getBoolean(KEY_DB_SSL, false);
+    }
+
+    public static String getContextPath(JsonObject config) {
+        JsonObject app = config.getJsonObject("app");
+        if (app != null && app.containsKey("context-path")) {
+            String path = app.getString("context-path");
+            // Normalize: ensure starts with / and doesn't end with /
+            if (path == null) return "";
+            path = path.trim();
+            if (!path.startsWith("/")) path = "/" + path;
+            if (path.length() > 1 && path.endsWith("/")) path = path.substring(0, path.length() - 1);
+            return path;
+        }
+        return "";
     }
 
     public static String getProfile(JsonObject config) {
