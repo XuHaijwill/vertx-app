@@ -163,9 +163,10 @@ public class MainVerticle extends AbstractVerticle {
         new SysConfigApi(vertx).registerRoutes(router, contextPath);
         new DocsApi(vertx).registerRoutes(router, contextPath);
         new OrderApi(vertx).registerRoutes(router, contextPath);
+        new PaymentApi(vertx).registerRoutes(router, contextPath);
         new AuthApi(vertx, authConfig).registerRoutes(router, contextPath);
 
-        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, Order, Docs, Auth");
+        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, Order, Payment, Docs, Auth");
     }
 
     // ================================================================
@@ -261,6 +262,7 @@ public class MainVerticle extends AbstractVerticle {
         LOG.info("+  Users:     {}/api/users                  +", baseUrl);
         LOG.info("+  Products:  {}/api/products              +", baseUrl);
         LOG.info("+  Orders:    {}/api/orders                  +", baseUrl);
+        LOG.info("+  Payments:   {}/api/payments                +", baseUrl);
         LOG.info("+  Swagger:   {}/docs                      +", baseUrl);
         LOG.info("+------------------------------------------------------------+");
         LOG.info("+  Profile:   {}  |  DB: {}  |  Java: {}        +",

@@ -37,8 +37,8 @@ public class TransactionContext {
     /**
      * Create a new transaction context.
      *
-     * @param conn     the transaction-scoped connection
-     * @param timeoutMs the timeout budget (ms) — for logging only
+     * @param conn      the transaction-scoped connection
+     * @param timeoutMs timeout budget (ms) — for logging only
      */
     public TransactionContext(SqlConnection conn, long timeoutMs) {
         this.conn = conn;
@@ -102,8 +102,7 @@ public class TransactionContext {
     public void checkTimeout() {
         if (elapsedMs() > timeoutMs * 0.9) {  // 90% threshold
             throw new RuntimeException("Transaction approaching timeout: "
-                + elapsedMs() + "ms / " + timeoutMs + "ms ("
-                + operationCount + " ops)");
+                + elapsedMs() + "ms / " + timeoutMs + "ms (" + operationCount + " ops)");
         }
     }
 
