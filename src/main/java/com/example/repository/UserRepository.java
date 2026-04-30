@@ -132,6 +132,36 @@ public class UserRepository {
             .map(rows -> rows.rowCount() > 0);
     }
 
+    public Future<Integer> deleteByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return Future.succeededFuture(0);
+        String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
+        String sql = "DELETE FROM users WHERE id IN (" + placeholders + ")";
+        Tuple params = Tuple.tuple();
+        for (Long id : ids) params.addLong(id);
+        return DatabaseVerticle.query(vertx, sql, params).map(rows -> rows.rowCount());
+    }
+
+    public Future<List<JsonObject>> createBatch(List<JsonObject> users) {
+        if (users == null || users.isEmpty()) return Future.succeededFuture(List.of());
+        List<String> columns = List.of("name", "email", "age", "department", "status");
+        List<List<Object>> values = users.stream().map(u -> List.<Object>of(
+            u.getString("name"),
+            u.getString("email"),
+            u.getInteger("age"),
+            u.getString("department"),
+            u.getString("status", "active")
+        )).collect(java.util.stream.Collectors.toList());
+        return com.example.db.BatchOperations.multiRowInsert(vertx, "users", columns, values, "id")
+            .compose(ids -> {
+                if (ids.isEmpty()) return Future.succeededFuture(List.<JsonObject>of());
+                String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
+                Tuple params = Tuple.tuple();
+                for (Long id : ids) params.addLong(id);
+                return DatabaseVerticle.query(vertx, "SELECT * FROM users WHERE id IN (" + placeholders + ") ORDER BY id", params)
+                    .map(DatabaseVerticle::toJsonList);
+            });
+    }
+
     public Future<Boolean> existsByEmail(String email) {
         String sql = "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1) as exists";
         Tuple params = Tuple.tuple().addString(email);

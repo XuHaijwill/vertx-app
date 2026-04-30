@@ -109,6 +109,38 @@ public class ProductRepository {
         return DatabaseVerticle.query(vertx, sql, params).map(rows -> rows.rowCount() > 0);
     }
 
+    public Future<Integer> deleteByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return Future.succeededFuture(0);
+        String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
+        String sql = "DELETE FROM products WHERE id IN (" + placeholders + ")";
+        Tuple params = Tuple.tuple();
+        for (Long id : ids) params.addLong(id);
+        return DatabaseVerticle.query(vertx, sql, params).map(rows -> rows.rowCount());
+    }
+
+    public Future<List<JsonObject>> createBatch(List<JsonObject> products) {
+        if (products == null || products.isEmpty()) return Future.succeededFuture(List.of());
+        List<String> columns = List.of("name", "category", "price", "stock", "description", "status");
+        List<List<Object>> values = products.stream().map(p -> List.<Object>of(
+            p.getString("name"),
+            p.getString("category"),
+            java.math.BigDecimal.valueOf(p.getDouble("price", 0.0)),
+            p.getInteger("stock", 0),
+            p.getString("description"),
+            p.getString("status", "active")
+        )).collect(java.util.stream.Collectors.toList());
+        return com.example.db.BatchOperations.multiRowInsert(vertx, "products", columns, values, "id")
+            .compose(ids -> {
+                if (ids.isEmpty()) return Future.succeededFuture(List.<JsonObject>of());
+                // fetch inserted rows by IDs
+                String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
+                Tuple params = Tuple.tuple();
+                for (Long id : ids) params.addLong(id);
+                return DatabaseVerticle.query(vertx, "SELECT * FROM products WHERE id IN (" + placeholders + ") ORDER BY id", params)
+                    .map(DatabaseVerticle::toJsonList);
+            });
+    }
+
     public Future<List<JsonObject>> search(String keyword, String category) {
         return search(keyword, category, 1, Integer.MAX_VALUE);
     }

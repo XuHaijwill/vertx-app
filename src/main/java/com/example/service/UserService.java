@@ -17,4 +17,7 @@ public interface UserService {
     Future<JsonObject> update(Long id, JsonObject user);
     Future<Void> delete(Long id);
     Future<Boolean> exists(String email);
+    Future<JsonObject> batchCreate(List<JsonObject> users);
+    Future<JsonObject> batchUpdate(List<JsonObject> users);
+    Future<JsonObject> batchDelete(List<Long> ids);
 }

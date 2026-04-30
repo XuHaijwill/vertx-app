@@ -16,4 +16,7 @@ public interface ProductService {
     Future<JsonObject> create(JsonObject product);
     Future<JsonObject> update(Long id, JsonObject product);
     Future<Void> delete(Long id);
+    Future<JsonObject> batchCreate(List<JsonObject> products);
+    Future<JsonObject> batchUpdate(List<JsonObject> products);
+    Future<JsonObject> batchDelete(List<Long> ids);
 }
