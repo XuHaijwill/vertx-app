@@ -164,9 +164,10 @@ public class MainVerticle extends AbstractVerticle {
         new DocsApi(vertx).registerRoutes(router, contextPath);
         new OrderApi(vertx).registerRoutes(router, contextPath);
         new PaymentApi(vertx).registerRoutes(router, contextPath);
+        new BatchApi(vertx).registerRoutes(router, contextPath);
         new AuthApi(vertx, authConfig).registerRoutes(router, contextPath);
 
-        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, Order, Payment, Docs, Auth");
+        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, Order, Payment, Batch, Docs, Auth");
     }
 
     // ================================================================
