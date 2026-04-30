@@ -1,9 +1,11 @@
 package com.example.service;
 
 import com.example.core.BusinessException;
-import com.example.core.PageResult;
 import com.example.db.DatabaseVerticle;
+import com.example.db.Transactional;
 import com.example.db.TransactionContext;
+import com.example.db.TransactionTemplate;
+import com.example.db.TxContextHolder;
 import com.example.repository.InventoryTransactionRepository;
 import com.example.repository.OrderRepository;
 import com.example.repository.PaymentRepository;
@@ -13,6 +15,7 @@ import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.sqlclient.Tuple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,44 +23,23 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * Payment Service — demonstrates a complex multi-table transaction scenario.
+ * Payment Service — 5-table / 4-table multi-Repository declarative transactions.
  *
- * <p>This service handles the atomic payment flow: when a user pays for an order,
- * 5 database tables are modified within a single ACID transaction:
- *
+ * <p>Two transactional scenarios:
  * <ol>
- *   <li><b>payments</b>         — record the payment transaction
- *   <li><b>orders</b>            — update order status: pending → paid/completed
- *   <li><b>products</b>         — deduct stock (stock already deducted at order creation,
- *                                  but confirmed on payment in this model)
- *   <li><b>inventory_transactions</b> — ledger entry for stock confirmation
- *   <li><b>users</b>             — deduct user balance (for balance payments)
+ *   <li><b>processPayment</b> — payments + orders + users + products + inventory_transactions
+ *   <li><b>refundPayment</b>  — payments + orders + users + inventory_transactions
  * </ol>
  *
- * <p><b>Transaction: processPayment (5 tables, 4 Repositories)</b>
- * <pre>
- * BEGIN
- *   1. Lock order FOR UPDATE          → OrderRepository.findByIdForUpdate
- *   2. Lock user FOR UPDATE           → UserRepository.findByIdForUpdate
- *   3. Deduct user balance            → UserRepository.deductBalance
- *   4. Insert payment record          → PaymentRepository.insertPayment
- *   5. Update payment to completed    → PaymentRepository.updateStatus
- *   6. Update order to completed     → OrderRepository.updateStatusInTx
- *   7. Confirm stock deduction        → ProductRepository + InventoryTransactionRepository
- *   8. Increment user order_count     → UserRepository.updateUserOrderCount
- * COMMIT / ROLLBACK
- * </pre>
- *
- * <p><b>Transaction: refundPayment (4 tables, 3 Repositories)</b>
- * Similar structure: lock payment → lock order → restore balance → record refund → update statuses.
- *
- * <p>Idempotency: both processPayment and refundPayment check for existing
- * payment records before proceeding, preventing duplicate payment processing.
+ * <p>All repository calls auto-detect {@link TxContextHolder#current()}.
+ * {@link Transactional} annotation on public methods replaces
+ * {@code DatabaseVerticle.withTransaction(vertx, tx -> ...)} wrapper.
  */
 public class PaymentService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PaymentService.class);
 
+    private final TransactionTemplate tx;
     private final PaymentRepository paymentRepo;
     private final OrderRepository orderRepo;
     private final UserRepository userRepo;
@@ -68,6 +50,7 @@ public class PaymentService {
 
     public PaymentService(Vertx vertx) {
         this.vertx = vertx;
+        this.tx = new TransactionTemplate(vertx);
         this.paymentRepo = new PaymentRepository(vertx);
         this.orderRepo = new OrderRepository(vertx);
         this.userRepo = new UserRepository(vertx);
@@ -77,18 +60,16 @@ public class PaymentService {
     }
 
     // ================================================================
-    // Transaction: Process Payment
+    // Declarative Transaction: Process Payment (5 tables)
     // ================================================================
 
     /**
      * Process a payment for an order — ALL 5 TABLES in one transaction.
      *
-     * <p>Idempotent: if a completed payment already exists for this order,
-     * returns it without re-processing.
-     *
-     * @param request JSON with: orderId, method (balance|card|alipay|wechat)
-     * @return payment record with order and user details
+     * <p>Idempotent: if a completed payment already exists, returns it without re-processing.
+     * Repository calls auto-detect {@link TxContextHolder#current()}.
      */
+    @Transactional(timeoutMs = 30_000)
     public Future<JsonObject> processPayment(JsonObject request) {
         if (!dbAvailable) {
             return Future.failedFuture(BusinessException.serverError("Database not available"));
@@ -101,160 +82,133 @@ public class PaymentService {
             return Future.failedFuture(BusinessException.badRequest("orderId is required"));
         }
 
-        return DatabaseVerticle.withTransaction(vertx, tx ->
-            // Step 1: Idempotency — check if already paid
-            paymentRepo.findByOrderIdInTx(tx, orderId)
-                .compose(existing -> {
-                    if (existing != null && "completed".equals(existing.getString("status"))) {
-                        LOG.info("[PAY] Already processed: orderId={}", orderId);
-                        return Future.succeededFuture(existing.copy()
-                            .put("_idempotent", true));
-                    }
-                    return doProcessPayment(tx, orderId, method);
-                }),
-            30_000  // 30s timeout
-        ).onSuccess(result -> LOG.info("[PAY] Processed: orderId={}, paymentId={}, method={}",
-            orderId, result.getLong("id"), method))
-        .onFailure(err -> LOG.error("[PAY] Failed: orderId={}, err={}", orderId, err.getMessage()));
+        // Idempotency check
+        return paymentRepo.findByOrderIdForTx(orderId)
+            .compose(existing -> {
+                if (existing != null && "completed".equals(existing.getString("status"))) {
+                    LOG.info("[PAY] Already processed: orderId={}", orderId);
+                    return Future.succeededFuture(existing.copy().put("_idempotent", true));
+                }
+                return doProcessPayment(orderId, method);
+            })
+            .onSuccess(result -> LOG.info("[PAY] Processed: orderId={}, paymentId={}, method={}",
+                orderId, result.getLong("id"), method))
+            .onFailure(err -> LOG.error("[PAY] Failed: orderId={}, err={}", orderId, err.getMessage()));
     }
 
-    private Future<JsonObject> doProcessPayment(TransactionContext tx, Long orderId, String method) {
-        // Step 2: Lock & validate order
-        return orderRepo.findByIdForUpdate(tx, orderId)
+    private Future<JsonObject> doProcessPayment(Long orderId, String method) {
+        // Step 1: Lock & validate order
+        return orderRepo.findByIdForUpdate(orderId)
             .compose(order -> {
                 String status = order.getString("status");
                 if ("paid".equals(status) || "completed".equals(status)) {
-                    return Future.failedFuture(
+                    return Future.<JsonObject>failedFuture(
                         BusinessException.conflict("Order already paid: " + orderId));
                 }
                 if ("cancelled".equals(status)) {
-                    return Future.failedFuture(
+                    return Future.<JsonObject>failedFuture(
                         BusinessException.badRequest("Cannot pay cancelled order: " + orderId));
                 }
                 return Future.succeededFuture(order);
             })
-            // Step 3: Lock & validate user
+            // Step 2: Lock user & deduct balance (for balance payments)
             .compose(order -> {
                 Long userId = order.getLong("user_id");
-                return userRepo.findByIdForUpdate(tx, userId)
-                    .compose(user -> {
-                        BigDecimal total = new BigDecimal(order.getString("total", "0"));
-                        // Step 4: Deduct balance (for balance payments)
-                        if ("balance".equals(method)) {
-                            return userRepo.deductBalance(tx, userId, total)
-                                .map(order);
-                        }
-                        return Future.succeededFuture(order);
-                    });
+                BigDecimal total = new BigDecimal(order.getString("total", "0"));
+                if ("balance".equals(method)) {
+                    return userRepo.deductBalance(userId, total).map(order);
+                }
+                return Future.succeededFuture(order);
             })
-            // Step 5: Insert pending payment
+            // Step 3: Insert pending payment
             .compose(order -> {
                 Long userId = order.getLong("user_id");
                 BigDecimal amount = new BigDecimal(order.getString("total", "0"));
-                return paymentRepo.insertPayment(tx, orderId, userId, amount, method, "pending")
+                return paymentRepo.insertPayment(orderId, userId, amount, method, "pending")
                     .map(order);
             })
-            // Step 6: Update payment to completed
-            .compose(order -> {
-                // Find the payment we just inserted (no paymentId variable scope issue)
-                return paymentRepo.findByOrderIdInTx(tx, orderId)
-                    .compose(payment -> {
-                        Long paymentId = payment.getLong("id");
-                        return paymentRepo.updateStatus(tx, paymentId, "completed")
-                            .map(order);
-                    });
-            })
-            // Step 7: Update order status
-            .compose(order -> orderRepo.updateStatusInTx(tx, orderId, "completed").map(order))
-            // Step 8: Confirm stock + record inventory ledger
+            // Step 4: Update payment to completed
             .compose(order ->
-                confirmStockAndLedger(tx, orderId).map(order))
-            // Step 9: Increment user order_count
+                paymentRepo.findByOrderIdForTx(orderId)
+                    .compose(payment -> paymentRepo.updatePaymentStatus(payment.getLong("id"), "completed"))
+                    .map(order))
+            // Step 5: Update order status
+            .compose(order -> orderRepo.updateStatus(orderId, "completed").map(order))
+            // Step 6: Confirm stock + record inventory ledger
+            .compose(order -> confirmStockAndLedger(orderId).map(order))
+            // Step 7: Increment user order_count
             .compose(order -> {
                 Long userId = order.getLong("user_id");
-                return userRepo.updateUserOrderCount(tx, userId, 1).map(order);
+                return userRepo.updateUserOrderCount(userId, 1).map(order);
             })
-            // Step 10: Return enriched payment record
-            .compose(order -> {
-                Long userId = order.getLong("user_id");
-                return paymentRepo.findByOrderIdInTx(tx, orderId)
+            // Step 8: Return enriched payment record
+            .compose(order ->
+                paymentRepo.findByOrderIdForTx(orderId)
                     .map(payment -> payment.copy()
                         .put("orderTotal", order.getString("total"))
                         .put("orderStatus", "completed")
-                        .put("userName", order.getString("user_name")));
-            });
+                        .put("userName", order.getString("user_name"))));
     }
 
     // ================================================================
-    // Transaction: Refund Payment
+    // Declarative Transaction: Refund Payment (4 tables)
     // ================================================================
 
     /**
-     * Refund a payment — restore balance, update payment + order status.
-     *
-     * <p>Steps within ONE transaction:
-     *   1. Lock payment FOR UPDATE → validate not already refunded
-     *   2. Lock user → restore balance
-     *   3. Update payment status to refunded
-     *   4. Update order status to refunded
+     * Refund a completed payment — restore balance + update statuses in ONE transaction.
      *
      * <p>Idempotent: returns existing refund if already processed.
+     *
+     * <p>Steps within ONE transaction:
+     *   1. Lock payment FOR UPDATE
+     *   2. Restore balance (for balance payments)
+     *   3. Update payment status → refunded
+     *   4. Update order status → refunded
      */
+    @Transactional(timeoutMs = 20_000)
     public Future<JsonObject> refundPayment(Long paymentId) {
         if (!dbAvailable) {
             return Future.failedFuture(BusinessException.serverError("Database not available"));
         }
 
-        return DatabaseVerticle.withTransaction(vertx, tx -> {
-            // Step 1: Find and lock payment
-            String sql = "SELECT * FROM payments WHERE id = $1 FOR UPDATE";
-            return DatabaseVerticle.queryOneInTx(tx.conn(), sql,
-                    io.vertx.sqlclient.Tuple.tuple().addLong(paymentId))
-                .compose(payment -> {
-                    if (payment == null) {
-                        return Future.failedFuture(BusinessException.notFound("Payment"));
-                    }
-                    String status = payment.getString("status");
-                    if ("refunded".equals(status)) {
-                        return Future.succeededFuture(payment.copy().put("_idempotent", true));
-                    }
-                    if (!"completed".equals(status)) {
-                        return Future.failedFuture(
-                            BusinessException.badRequest(
-                                "Can only refund completed payments, current status: " + status));
-                    }
-                    return Future.succeededFuture(payment);
-                })
-                // Step 2: Lock user → restore balance
-                .compose(payment -> {
-                    Long userId = payment.getLong("user_id");
-                    BigDecimal amount = new BigDecimal(payment.getString("amount", "0"));
-                    String method = payment.getString("method", "balance");
-                    if ("balance".equals(method)) {
-                        return userRepo.addBalance(tx, userId, amount)
-                            .map(payment);
-                    }
-                    return Future.succeededFuture(payment);
-                })
-                // Step 3: Update payment status
-                .compose(payment -> paymentRepo.updateStatus(tx, paymentId, "refunded").map(payment))
-                // Step 4: Update order status
-                .compose(payment -> {
-                    Long orderId = payment.getLong("order_id");
-                    return orderRepo.updateStatusInTx(tx, orderId, "refunded")
-                        .map(payment);
-                })
-                // Step 5: Return updated payment
-                .compose(payment -> {
-                    String sql2 = "SELECT p.*, o.total as order_total, o.status as order_status, " +
-                        "u.name as user_name FROM payments p " +
-                        "LEFT JOIN orders o ON p.order_id = o.id " +
-                        "LEFT JOIN users u ON p.user_id = u.id WHERE p.id = $1";
-                    return DatabaseVerticle.queryOneInTx(tx.conn(), sql2,
-                        io.vertx.sqlclient.Tuple.tuple().addLong(paymentId))
-                        .map(p -> p != null ? p : payment);
-                });
-        }, 20_000);
+        // Step 1: Lock payment FOR UPDATE
+        return lockPaymentForUpdate(paymentId)
+            .compose(payment -> {
+                if (payment == null) {
+                    return Future.<JsonObject>failedFuture(BusinessException.notFound("Payment"));
+                }
+                String status = payment.getString("status");
+                if ("refunded".equals(status)) {
+                    return Future.succeededFuture(payment.copy().put("_idempotent", true));
+                }
+                if (!"completed".equals(status)) {
+                    return Future.<JsonObject>failedFuture(
+                        BusinessException.badRequest(
+                            "Can only refund completed payments, current status: " + status));
+                }
+                return Future.succeededFuture(payment);
+            })
+            // Step 2: Restore balance (for balance payments)
+            .compose(payment -> {
+                Long userId = payment.getLong("user_id");
+                BigDecimal amount = new BigDecimal(payment.getString("amount", "0"));
+                String method = payment.getString("method", "balance");
+                if ("balance".equals(method)) {
+                    return userRepo.addBalance(userId, amount).map(payment);
+                }
+                return Future.succeededFuture(payment);
+            })
+            // Step 3: Update payment status → refunded
+            .compose(payment -> paymentRepo.updatePaymentStatus(paymentId, "refunded").map(payment))
+            // Step 4: Update order status → refunded
+            .compose(payment -> {
+                Long orderId = payment.getLong("order_id");
+                return orderRepo.updateStatus(orderId, "refunded").map(payment);
+            })
+            // Step 5: Return enriched payment
+            .compose(payment -> findPaymentEnriched(paymentId).map(p -> p != null ? p : payment))
+            .onSuccess(result -> LOG.info("[PAY] Refunded: paymentId={}", paymentId))
+            .onFailure(err -> LOG.error("[PAY] Refund failed: paymentId={}, err={}", paymentId, err.getMessage()));
     }
 
     // ================================================================
@@ -290,35 +244,67 @@ public class PaymentService {
     // ================================================================
 
     /**
-     * Confirm stock deduction for all order items and record inventory ledger.
-     * In this model, stock was pre-deducted on order creation.
-     * On payment confirmation, we log the "confirmed" ledger entry.
-     *
-     * <p>If stock was NOT pre-deducted (separate model), use deductStockSequence here instead.
+     * Lock a payment row FOR UPDATE inside the current transaction.
+     * Uses {@link TxContextHolder#current()} — only valid inside a {@link Transactional} method.
      */
-    private Future<Void> confirmStockAndLedger(TransactionContext tx, Long orderId) {
-        return orderRepo.findItemsByOrderIdInTx(tx, orderId)
-            .compose(items -> confirmStockLoop(tx, orderId, items, 0));
+    private Future<JsonObject> lockPaymentForUpdate(Long paymentId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx == null) {
+            return Future.failedFuture(new IllegalStateException(
+                "lockPaymentForUpdate called outside a transaction"));
+        }
+        tx.tick();
+        String sql = "SELECT * FROM payments WHERE id = $1 FOR UPDATE";
+        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, Tuple.tuple().addLong(paymentId));
     }
 
-    private Future<Void> confirmStockLoop(TransactionContext tx, Long orderId,
-                                           JsonArray items, int index) {
+    /**
+     * Return enriched payment with order + user details.
+     * Uses {@link TxContextHolder#current()} — only valid inside a {@link Transactional} method.
+     */
+    private Future<JsonObject> findPaymentEnriched(Long paymentId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx == null) {
+            return Future.failedFuture(new IllegalStateException(
+                "findPaymentEnriched called outside a transaction"));
+        }
+        tx.tick();
+        String sql = "SELECT p.*, o.total as order_total, o.status as order_status, " +
+            "u.name as user_name FROM payments p " +
+            "LEFT JOIN orders o ON p.order_id = o.id " +
+            "LEFT JOIN users u ON p.user_id = u.id WHERE p.id = $1";
+        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, Tuple.tuple().addLong(paymentId));
+    }
+
+    /**
+     * Confirm stock deduction and record inventory ledger.
+     * In "pre-deduct on create" model: stock was already reduced at order creation.
+     * On payment confirmation, we write a zero-delta ledger entry.
+     */
+    private Future<Void> confirmStockAndLedger(Long orderId) {
+        return orderRepo.findItemsByOrderIdForTx(orderId)
+            .compose(this::confirmStockLoop);
+    }
+
+    private Future<Void> confirmStockLoop(JsonArray items) {
+        return confirmStockLoopImpl(items, 0);
+    }
+
+    private Future<Void> confirmStockLoopImpl(JsonArray items, int index) {
         if (index >= items.size()) return Future.succeededFuture();
         JsonObject item = items.getJsonObject(index);
         Long productId = item.getLong("product_id");
-        int quantity = item.getInteger("quantity");
+        Long orderId = item.getLong("order_id");
 
-        return productRepo.findByIdForUpdate(tx, productId)
+        // All calls auto-detect TxContextHolder — no explicit tx parameter needed
+        return productRepo.findByIdForUpdate(productId)
             .compose(product -> {
-                // In "pre-deduct on create" model: stock is already reduced.
-                // Ledger was written on order creation (order_create).
-                // Here we write a confirmation entry (no delta change).
                 int stockAfter = product.getInteger("stock", 0);
-                return invTxRepo.recordRestoration(tx, productId, orderId,
+                return invTxRepo.recordRestoration(productId, orderId,
                     0, stockAfter, stockAfter,
-                    "Payment confirmed for order " + orderId + ": stock already deducted at creation")
-                    .mapEmpty();
+                    "Payment confirmed for order " + orderId +
+                        ": stock already deducted at creation");
             })
-            .compose(v -> confirmStockLoop(tx, orderId, items, index + 1));
+            .compose(v -> confirmStockLoopImpl(items, index + 1));
     }
 }

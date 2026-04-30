@@ -1,7 +1,9 @@
 package com.example.api;
 
+import com.example.core.ApiResponse;
 import com.example.auth.AuthConfig;
 import io.vertx.core.Vertx;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
@@ -65,9 +67,9 @@ public class AuthApi extends BaseApi {
         JsonObject user = ctx.get("user");
         if (user == null) {
             // Auth not enabled or not configured
-            ok(ctx, new JsonObject()
-                .put("authenticated", false)
-                .put("message", "Authentication not enabled"));
+            ctx.json(new ApiResponse()
+                .success(new JsonObject().put("authenticated", false).put("message", "Authentication not enabled"))
+                .toJson());
             return;
         }
 
@@ -75,10 +77,9 @@ public class AuthApi extends BaseApi {
         @SuppressWarnings("unchecked")
         java.util.Set<String> roles = ctx.get("roles");
 
-        ok(ctx, new JsonObject()
+        JsonObject data = new JsonObject()
             .put("authenticated", true)
             .put("username", username)
-            .put("roles", roles)
             .put("subject", user.getString("sub"))
             .put("email", user.getString("email"))
             .put("name", user.getString("name"))
@@ -86,8 +87,14 @@ public class AuthApi extends BaseApi {
             .put("familyName", user.getString("family_name"))
             .put("issuer", user.getString("iss"))
             .put("tokenType", user.getString("typ"))
-            .put("expiresAt", user.getLong("exp"))
-        );
+            .put("expiresAt", user.getLong("exp"));
+
+        // Extra top-level keys: roles as permission, total role count
+        ctx.json(new ApiResponse()
+            .success(data)
+            .putExtra("permission", roles != null ? new JsonArray(new java.util.ArrayList<>(roles)) : new JsonArray())
+            .putExtra("rolesCount", roles != null ? roles.size() : 0)
+            .toJson());
     }
 
     /**
@@ -107,10 +114,10 @@ public class AuthApi extends BaseApi {
         }
 
         String logoutUrl = authConfig.getLogoutUrl();
-        if (logoutUrl.isEmpty()) {
-            ok(ctx, new JsonObject()
-                .put("logoutUrl", "")
-                .put("message", "Logout URL not configured"));
+        if (logoutUrl == null || logoutUrl.isEmpty()) {
+            ctx.json(new ApiResponse()
+                .success(new JsonObject().put("logoutUrl", "").put("message", "Logout URL not configured"))
+                .toJson());
             return;
         }
 
@@ -122,7 +129,8 @@ public class AuthApi extends BaseApi {
             url.append("&post_logout_redirect_uri=").append(redirectUri);
         }
 
-        ok(ctx, new JsonObject()
-            .put("logoutUrl", url.toString()));
+        ctx.json(new ApiResponse()
+            .success(new JsonObject().put("logoutUrl", url.toString()))
+            .toJson());
     }
 }

@@ -2,6 +2,7 @@ package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
+import com.example.db.TxContextHolder;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -19,8 +20,9 @@ import java.util.List;
  *   <li>Anti-racing: used in conjunction with SELECT ... FOR UPDATE on products</li>
  * </ul>
  *
- * <p>All transaction-aware methods ensure the stock ledger stays consistent with
- * the actual product.stock field.
+ * <p>All methods support auto-routing: if called inside a {@code @Transactional}
+ * service method, the active transaction is detected via {@link TxContextHolder#current()};
+ * if called outside a transaction, each call creates its own mini-transaction (5s timeout).
  */
 public class InventoryTransactionRepository {
 
@@ -59,52 +61,116 @@ public class InventoryTransactionRepository {
     }
 
     // ================================================================
-    // Transaction-based methods
+    // Auto-route variants (declarative-transaction — preferred entry points)
     // ================================================================
 
     /**
-     * Record a stock deduction (order creation) inside a transaction.
+     * Record a stock deduction (order creation) — auto-detects active transaction.
+     *
+     * @see #recordDeduction(TransactionContext, Long, Long, int, int, int, String)
+     */
+    public Future<Long> recordDeduction(Long productId, Long orderId,
+                                        int delta, int stockBefore, int stockAfter,
+                                        String reason) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return recordDeductionInTx(tx, productId, orderId, delta, stockBefore, stockAfter, reason);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> recordDeductionInTx(txCtx, productId, orderId, delta, stockBefore, stockAfter, reason),
+            5_000);
+    }
+
+    /**
+     * Record a stock restoration (order cancellation) — auto-detects active transaction.
+     *
+     * @see #recordRestoration(TransactionContext, Long, Long, int, int, int, String)
+     */
+    public Future<Long> recordRestoration(Long productId, Long orderId,
+                                          int delta, int stockBefore, int stockAfter,
+                                          String reason) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return recordRestorationInTx(tx, productId, orderId, delta, stockBefore, stockAfter, reason);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> recordRestorationInTx(txCtx, productId, orderId, delta, stockBefore, stockAfter, reason),
+            5_000);
+    }
+
+    /**
+     * Record a manual stock adjustment — auto-detects active transaction.
+     *
+     * @see #recordAdjustment(TransactionContext, Long, int, int, int, String, Long)
+     */
+    public Future<Long> recordAdjustment(Long productId,
+                                          int delta, int stockBefore, int stockAfter,
+                                          String reason, Long operatorId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return recordAdjustmentInTx(tx, productId, delta, stockBefore, stockAfter, reason, operatorId);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> recordAdjustmentInTx(txCtx, productId, delta, stockBefore, stockAfter, reason, operatorId),
+            5_000);
+    }
+
+    // ================================================================
+    // Context-based (explicit tx) — kept for explicit transaction use cases
+    // ================================================================
+
+    /**
+     * Record a stock deduction — explicit transaction.
      *
      * <p>Assumes the caller has already locked the product row with
      * {@code SELECT ... FOR UPDATE} to prevent TOCTOU races.
      *
-     * @param tx          active transaction context
-     * @param productId   product being modified
-     * @param orderId     associated order (nullable for manual adjustments)
-     * @param delta       negative integer (e.g. -3 means 3 units sold)
-     * @param stockBefore current stock BEFORE the change
-     * @param stockAfter  expected stock AFTER the change
-     * @param reason      human-readable reason
      * @return the generated transaction ID
      */
     public Future<Long> recordDeduction(TransactionContext tx, Long productId, Long orderId,
                                          int delta, int stockBefore, int stockAfter, String reason) {
-        tx.tick();
-        return insert(tx, productId, orderId, "order_create", delta, stockBefore, stockAfter, reason, null);
+        return recordDeductionInTx(tx, productId, orderId, delta, stockBefore, stockAfter, reason);
     }
 
     /**
-     * Record a stock restoration (order cancellation) inside a transaction.
+     * Record a stock restoration — explicit transaction.
      */
     public Future<Long> recordRestoration(TransactionContext tx, Long productId, Long orderId,
                                            int delta, int stockBefore, int stockAfter, String reason) {
-        tx.tick();
-        return insert(tx, productId, orderId, "order_cancel", delta, stockBefore, stockAfter, reason, null);
+        return recordRestorationInTx(tx, productId, orderId, delta, stockBefore, stockAfter, reason);
     }
 
     /**
-     * Record a manual stock adjustment (admin operation) inside a transaction.
+     * Record a manual stock adjustment — explicit transaction.
      */
     public Future<Long> recordAdjustment(TransactionContext tx, Long productId,
                                           int delta, int stockBefore, int stockAfter,
                                           String reason, Long operatorId) {
-        tx.tick();
-        return insert(tx, productId, null, "manual_adjust", delta, stockBefore, stockAfter, reason, operatorId);
+        return recordAdjustmentInTx(tx, productId, delta, stockBefore, stockAfter, reason, operatorId);
     }
 
-    private Future<Long> insert(TransactionContext tx, Long productId, Long orderId,
-                                 String type, int delta, int stockBefore, int stockAfter,
-                                 String reason, Long operatorId) {
+    // ================================================================
+    // Private internal implementations
+    // ================================================================
+
+    private Future<Long> recordDeductionInTx(TransactionContext tx, Long productId, Long orderId,
+                                             int delta, int stockBefore, int stockAfter,
+                                             String reason) {
+        tx.tick();
+        return insertInTx(tx, productId, orderId, "order_create", delta, stockBefore, stockAfter, reason, null);
+    }
+
+    private Future<Long> recordRestorationInTx(TransactionContext tx, Long productId, Long orderId,
+                                                int delta, int stockBefore, int stockAfter,
+                                                String reason) {
+        tx.tick();
+        return insertInTx(tx, productId, orderId, "order_cancel", delta, stockBefore, stockAfter, reason, null);
+    }
+
+    private Future<Long> recordAdjustmentInTx(TransactionContext tx, Long productId,
+                                               int delta, int stockBefore, int stockAfter,
+                                               String reason, Long operatorId) {
+        tx.tick();
+        return insertInTx(tx, productId, null, "manual_adjust", delta, stockBefore, stockAfter, reason, operatorId);
+    }
+
+    private Future<Long> insertInTx(TransactionContext tx, Long productId, Long orderId,
+                                    String type, int delta, int stockBefore, int stockAfter,
+                                    String reason, Long operatorId) {
         String sql = "INSERT INTO inventory_transactions " +
             "(product_id, order_id, type, delta, stock_before, stock_after, reason, operator_id) " +
             "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id";

@@ -16,6 +16,7 @@ public class ApiResponse {
     private Object data;
     private long timestamp;
     private long duration;
+    private int _httpStatus = 200;
 
     // Customizable key mapping (defaults)
     private static io.vertx.core.json.JsonObject keys = new io.vertx.core.json.JsonObject()
@@ -24,6 +25,9 @@ public class ApiResponse {
         .put("data", "data")
         .put("timestamp", "timestamp")
         .put("duration", "duration");
+
+    // Extra top-level keys for this response (e.g. permission, count, etc.)
+    private final io.vertx.core.json.JsonObject extra = new io.vertx.core.json.JsonObject();
 
     public ApiResponse() {
         this.timestamp = System.currentTimeMillis();
@@ -72,6 +76,65 @@ public class ApiResponse {
         return new ApiResponse().setCode(SUCCESS).setMessage("Query successful").setData(pageData);
     }
 
+    /**
+     * Add a custom top-level field to this response.
+     * Allows per-response extra fields like permission, count, tags, etc.
+     *
+     * <p>Example — add permission to auth/me response:
+     * <pre>
+     * ctx.json(new ApiResponse()
+     *     .success(userData)
+     *     .putExtra("permission", roles)
+     *     .toJson());
+     * </pre>
+     * Produces: { code:"success", data:{...}, permission:[...], timestamp:... }
+     *
+     * @param key   field name
+     * @param value field value (any JSON-compatible type)
+     * @return this (fluent)
+     */
+    public ApiResponse putExtra(String key, Object value) {
+        if (key != null && !key.isEmpty()) {
+            extra.put(key, value);
+        }
+        return this;
+    }
+
+    /**
+     * Add multiple custom top-level fields at once.
+     *
+     * <p>Example:
+     * <pre>
+     * new ApiResponse().success(data).putExtras("permission", roles, "count", 42)
+     * </pre>
+     *
+     * @param kvPairs key, value, key, value... (must be even count)
+     * @return this (fluent)
+     */
+    public ApiResponse putExtras(Object... kvPairs) {
+        if (kvPairs != null) {
+            for (int i = 0; i < kvPairs.length - 1; i += 2) {
+                if (kvPairs[i] instanceof String k) {
+                    putExtra(k, kvPairs[i + 1]);
+                }
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Mark this response with a specific HTTP status code.
+     * The actual status is set by ctx.response().setStatusCode() in handlers;
+     * this field is used when a handler returns the ApiResponse's toJson()
+     * directly and still needs the correct status recorded.
+     */
+    public ApiResponse withStatus(int httpStatus) {
+        this._httpStatus = httpStatus;
+        return this;
+    }
+
+    public int getHttpStatus() { return _httpStatus; }
+
     // ========== Convert to JSON ==========
 
     public JsonObject toJson() {
@@ -86,6 +149,10 @@ public class ApiResponse {
         json.put(kCode, code).put(kMsg, message).put(kTs, timestamp);
         if (data != null) json.put(kData, data);
         if (duration > 0) json.put(kDur, duration);
+        // Merge all extra custom fields
+        for (String k : extra.fieldNames()) {
+            json.put(k, extra.getValue(k));
+        }
         return json;
     }
 

@@ -2,19 +2,22 @@ package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
+import com.example.db.TxContextHolder;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Tuple;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
  * User Repository - Database operations for users.
  *
- * <p>Two categories of methods:
- *   1. Pool-based (standalone) — use DatabaseVerticle.query(), no transaction
- *   2. Context-based (transactional) — receive TransactionContext, used inside withTransaction()
+ * <p>Three categories of methods:
+ *   1. <b>Pool-based</b> (standalone) — no transaction
+ *   2. <b>Auto-route</b> (declarative-tx) — auto-detects {@link TxContextHolder#current()}
+ *   3. <b>Context-based</b> (explicit tx) — receive {@code TransactionContext} parameter
  */
 public class UserRepository {
 
@@ -173,65 +176,102 @@ public class UserRepository {
     }
 
     // ================================================================
-    // Context-based (transactional) methods
-    // These receive TransactionContext for multi-Repo transactions
+    // Auto-route variants (declarative-transaction — preferred)
     // ================================================================
 
     /**
-     * Check if user exists and is active — inside a transaction.
-     * Uses SELECT ... FOR UPDATE to prevent concurrent modifications.
+     * Lock user row with FOR UPDATE — auto-detects active transaction.
+     *
+     * @see #findByIdForUpdate(TransactionContext, Long)
+     */
+    public Future<JsonObject> findByIdForUpdate(Long userId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return findByIdForUpdateInTx(tx, userId);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> findByIdForUpdateInTx(txCtx, userId), 5_000);
+    }
+
+    /**
+     * Deduct user balance — auto-detects active transaction.
+     *
+     * @see #deductBalance(TransactionContext, Long, BigDecimal)
+     */
+    public Future<Void> deductBalance(Long userId, BigDecimal amount) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return deductBalanceInTx(tx, userId, amount);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> deductBalanceInTx(txCtx, userId, amount), 5_000);
+    }
+
+    /**
+     * Add balance back — auto-detects active transaction (e.g., refund).
+     *
+     * @see #addBalance(TransactionContext, Long, BigDecimal)
+     */
+    public Future<Void> addBalance(Long userId, BigDecimal amount) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return addBalanceInTx(tx, userId, amount);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> addBalanceInTx(txCtx, userId, amount), 5_000);
+    }
+
+    /**
+     * Update user's order_count — auto-detects active transaction.
+     *
+     * @see #updateUserOrderCount(TransactionContext, Long, int)
+     */
+    public Future<Void> updateUserOrderCount(Long userId, int delta) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return updateUserOrderCountInTx(tx, userId, delta);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> updateUserOrderCountInTx(txCtx, userId, delta), 5_000);
+    }
+
+    // ================================================================
+    // Context-based (explicit tx) — kept for full control
+    // ================================================================
+
+    /**
+     * Lock user row with FOR UPDATE — explicit transaction.
      */
     public Future<JsonObject> findByIdForUpdate(TransactionContext tx, Long id) {
+        return findByIdForUpdateInTx(tx, id);
+    }
+
+    /**
+     * Deduct user balance — explicit transaction.
+     * Fails if balance is insufficient.
+     */
+    public Future<Void> deductBalance(TransactionContext tx, Long userId, BigDecimal amount) {
+        return deductBalanceInTx(tx, userId, amount);
+    }
+
+    /**
+     * Add balance back — explicit transaction (e.g., refund).
+     */
+    public Future<Void> addBalance(TransactionContext tx, Long userId, BigDecimal amount) {
+        return addBalanceInTx(tx, userId, amount);
+    }
+
+    /**
+     * Update user's order_count — explicit transaction.
+     */
+    public Future<Void> updateUserOrderCount(TransactionContext tx, Long userId, int delta) {
+        return updateUserOrderCountInTx(tx, userId, delta);
+    }
+
+    // ================================================================
+    // Private internal implementations
+    // ================================================================
+
+    private Future<JsonObject> findByIdForUpdateInTx(TransactionContext tx, Long id) {
         tx.tick();
         String sql = "SELECT * FROM users WHERE id = $1 FOR UPDATE";
         Tuple params = Tuple.tuple().addLong(id);
         return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params);
     }
 
-    /**
-     * Update user's order_count inside a transaction.
-     * Call via: updateUserOrderCount(tx, userId, +1) or updateUserOrderCount(tx, userId, -1)
-     */
-    public Future<Void> updateUserOrderCount(TransactionContext tx, Long userId, int delta) {
-        tx.tick();
-        String sql = "UPDATE users SET order_count = COALESCE(order_count, 0) + $1, " +
-            "updated_at = CURRENT_TIMESTAMP WHERE id = $2";
-        Tuple params = Tuple.tuple().addInteger(delta).addLong(userId);
-        return DatabaseVerticle.updateInTx(tx.conn(), sql, params).mapEmpty();
-    }
-
-    /**
-     * Update user fields inside a transaction.
-     */
-    public Future<JsonObject> updateInTx(TransactionContext tx, Long id, JsonObject user) {
-        tx.tick();
-        String sql = "UPDATE users SET " +
-            "name = COALESCE($1, name), " +
-            "email = COALESCE($2, email), " +
-            "age = COALESCE($3, age), " +
-            "department = COALESCE($4, department), " +
-            "status = COALESCE($5, status), " +
-            "updated_at = CURRENT_TIMESTAMP " +
-            "WHERE id = $6 RETURNING *";
-        Tuple params = Tuple.tuple()
-            .addString(user.getString("name"))
-            .addString(user.getString("email"))
-            .addInteger(user.getInteger("age"))
-            .addString(user.getString("department"))
-            .addString(user.getString("status"))
-            .addLong(id);
-        return DatabaseVerticle.queryInTx(tx.conn(), sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
-    }
-
-    /**
-     * Deduct user balance inside a transaction.
-     * Fails if balance is insufficient.
-     */
-    public Future<Void> deductBalance(TransactionContext tx, Long userId, java.math.BigDecimal amount) {
+    private Future<Void> deductBalanceInTx(TransactionContext tx, Long userId, BigDecimal amount) {
         tx.tick();
         String sql = "UPDATE users SET balance = balance - $1, updated_at = CURRENT_TIMESTAMP " +
             "WHERE id = $2 AND balance >= $1";
@@ -242,14 +282,19 @@ public class UserRepository {
                 : Future.succeededFuture());
     }
 
-    /**
-     * Add balance back inside a transaction (e.g., refund).
-     */
-    public Future<Void> addBalance(TransactionContext tx, Long userId, java.math.BigDecimal amount) {
+    private Future<Void> addBalanceInTx(TransactionContext tx, Long userId, BigDecimal amount) {
         tx.tick();
         String sql = "UPDATE users SET balance = balance + $1, updated_at = CURRENT_TIMESTAMP " +
             "WHERE id = $2";
         Tuple params = Tuple.tuple().addBigDecimal(amount).addLong(userId);
+        return DatabaseVerticle.updateInTx(tx.conn(), sql, params).mapEmpty();
+    }
+
+    private Future<Void> updateUserOrderCountInTx(TransactionContext tx, Long userId, int delta) {
+        tx.tick();
+        String sql = "UPDATE users SET order_count = COALESCE(order_count, 0) + $1, " +
+            "updated_at = CURRENT_TIMESTAMP WHERE id = $2";
+        Tuple params = Tuple.tuple().addInteger(delta).addLong(userId);
         return DatabaseVerticle.updateInTx(tx.conn(), sql, params).mapEmpty();
     }
 }

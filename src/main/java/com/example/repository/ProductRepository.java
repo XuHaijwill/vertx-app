@@ -2,6 +2,7 @@ package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
+import com.example.db.TxContextHolder;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -164,7 +165,65 @@ public class ProductRepository {
     }
 
     // ================================================================
-    // Context-based (transactional) methods
+    // Declarative-transaction variants (auto-route via TxContextHolder)
+    // These are the preferred entry points for @Transactional service methods.
+    // ================================================================
+
+    /**
+     * Lock a product row with FOR UPDATE — auto-detects active transaction.
+     *
+     * <p>If {@link TxContextHolder#current()} returns a context (inside a
+     * {@code @Transactional} method), uses it. Otherwise creates a short-lived
+     * transaction (5s timeout).
+     *
+     * @see #findByIdForUpdate(TransactionContext, Long)
+     */
+    public Future<JsonObject> findByIdForUpdate(Long productId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return findByIdForUpdateInTx(tx, productId);
+        // Rare path: called outside @Transactional — wrap in a quick transaction
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> findByIdForUpdateInTx(txCtx, productId), 5_000);
+    }
+
+    /**
+     * Deduct stock inside a transaction — auto-detects active transaction.
+     *
+     * @see #deductStock(TransactionContext, Long, int, Long)
+     */
+    public Future<Integer> deductStock(Long productId, int quantity, Long orderId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return deductStockInTx(tx, productId, quantity, orderId);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> deductStockInTx(txCtx, productId, quantity, orderId), 5_000);
+    }
+
+    /**
+     * Restore (add back) stock inside a transaction — auto-detects active transaction.
+     *
+     * @see #restoreStock(TransactionContext, Long, int, Long)
+     */
+    public Future<Integer> restoreStock(Long productId, int quantity, Long orderId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return restoreStockInTx(tx, productId, quantity, orderId);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> restoreStockInTx(txCtx, productId, quantity, orderId), 5_000);
+    }
+
+    /**
+     * Update product status inside a transaction — auto-detects active transaction.
+     *
+     * @see #updateStatusInTx(TransactionContext, Long, String)
+     */
+    public Future<Void> updateStatus(Long productId, String status) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return updateStatusInTx(tx, productId, status);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> updateStatusInTx(txCtx, productId, status), 5_000);
+    }
+
+    // ================================================================
+    // Context-based (transactional) methods — internal implementations
     // ================================================================
 
     /**
@@ -177,7 +236,7 @@ public class ProductRepository {
      *     .compose(product -> { ... validate stock ...; return Future.succeededFuture(); });
      * </pre>
      */
-    public Future<JsonObject> findByIdForUpdate(TransactionContext tx, Long productId) {
+    private Future<JsonObject> findByIdForUpdateInTx(TransactionContext tx, Long productId) {
         tx.tick();
         String sql = "SELECT * FROM products WHERE id = $1 FOR UPDATE";
         Tuple params = Tuple.tuple().addLong(productId);
@@ -202,7 +261,7 @@ public class ProductRepository {
      * @param orderId       associated order ID (for ledger)
      * @return updated stock level
      */
-    public Future<Integer> deductStock(TransactionContext tx, Long productId, int quantity, Long orderId) {
+    private Future<Integer> deductStockInTx(TransactionContext tx, Long productId, int quantity, Long orderId) {
         tx.tick();
         if (quantity <= 0) return Future.succeededFuture(0);
 
@@ -232,7 +291,7 @@ public class ProductRepository {
      * @param orderId       associated order ID (for ledger)
      * @return updated stock level
      */
-    public Future<Integer> restoreStock(TransactionContext tx, Long productId, int quantity, Long orderId) {
+    private Future<Integer> restoreStockInTx(TransactionContext tx, Long productId, int quantity, Long orderId) {
         tx.tick();
         if (quantity <= 0) return Future.succeededFuture(0);
 

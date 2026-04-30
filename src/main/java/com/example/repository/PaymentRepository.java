@@ -2,11 +2,13 @@ package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
+import com.example.db.TxContextHolder;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Tuple;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,8 +20,9 @@ import java.util.UUID;
  *   pending → failed (on balance/user error)
  *   completed → refunded (on refund)
  *
- * <p>Transactional methods receive TransactionContext, enabling multi-Repo
- * transactions alongside OrderRepository, ProductRepository, and UserRepository.
+ * <p>All methods support auto-routing via {@link TxContextHolder#current()}.
+ * Within a {@code @Transactional} service method, no explicit {@code TransactionContext}
+ * parameter is needed.
  */
 public class PaymentRepository {
 
@@ -33,9 +36,6 @@ public class PaymentRepository {
     // Pool-based queries (standalone — no transaction)
     // ================================================================
 
-    /**
-     * Find payment by ID (with order + user info).
-     */
     public Future<JsonObject> findById(Long id) {
         String sql = "SELECT p.*, o.total as order_total, o.status as order_status, " +
             "u.name as user_name FROM payments p " +
@@ -50,7 +50,7 @@ public class PaymentRepository {
     }
 
     /**
-     * Find payment by order ID.
+     * Find payment by order ID (non-tx version).
      */
     public Future<JsonObject> findByOrderId(Long orderId) {
         String sql = "SELECT p.* FROM payments p WHERE p.order_id = $1 ORDER BY p.id DESC LIMIT 1";
@@ -62,9 +62,6 @@ public class PaymentRepository {
             });
     }
 
-    /**
-     * Find payments by user ID.
-     */
     public Future<List<JsonObject>> findByUserId(Long userId) {
         String sql = "SELECT p.*, o.total as order_total FROM payments p " +
             "LEFT JOIN orders o ON p.order_id = o.id WHERE p.user_id = $1 " +
@@ -74,9 +71,6 @@ public class PaymentRepository {
             .map(DatabaseVerticle::toJsonList);
     }
 
-    /**
-     * Find payments by status.
-     */
     public Future<List<JsonObject>> findByStatus(String status) {
         String sql = "SELECT p.*, o.total as order_total, u.name as user_name FROM payments p " +
             "LEFT JOIN orders o ON p.order_id = o.id " +
@@ -88,25 +82,110 @@ public class PaymentRepository {
     }
 
     // ================================================================
-    // Transaction-based (context-aware) methods
+    // Auto-route variants (declarative-transaction — preferred entry points)
     // ================================================================
 
     /**
-     * Insert a new payment record inside a transaction.
+     * Insert a new payment record — auto-detects active transaction.
      *
-     * <p>Idempotency: pass the existing paymentId returned on success so callers
-     * can detect duplicate submissions.
+     * @see #insertPayment(TransactionContext, Long, Long, BigDecimal, String, String)
+     */
+    public Future<Long> insertPayment(Long orderId, Long userId,
+                                      BigDecimal amount, String method, String status) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return insertPaymentInTx(tx, orderId, userId, amount, method, status);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> insertPaymentInTx(txCtx, orderId, userId, amount, method, status),
+            10_000);
+    }
+
+    /**
+     * Update payment status — auto-detects active transaction.
      *
-     * @param tx       active transaction context
-     * @param orderId  order being paid
-     * @param userId   payer
-     * @param amount   payment amount
-     * @param method   payment method (balance|card|alipay|wechat)
-     * @param status   initial status (pending|completed|failed)
+     * @see #updateStatus(TransactionContext, Long, String)
+     */
+    public Future<Void> updatePaymentStatus(Long paymentId, String status) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return updateStatusInTx(tx, paymentId, status);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> updateStatusInTx(txCtx, paymentId, status),
+            5_000);
+    }
+
+    /**
+     * Find payment by order ID inside a transaction — auto-detects active transaction.
+     * Use for idempotency checks within a payment flow.
+     *
+     * @see #findByOrderIdInTx(TransactionContext, Long)
+     */
+    public Future<JsonObject> findByOrderIdForTx(Long orderId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return findByOrderIdInTx(tx, orderId);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> findByOrderIdInTx(txCtx, orderId), 5_000);
+    }
+
+    /**
+     * List recent payments for a user inside a transaction — auto-detects active transaction.
+     *
+     * @see #findByUserIdInTx(TransactionContext, Long, int)
+     */
+    public Future<List<JsonObject>> findByUserIdForTx(Long userId, int limit) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return findByUserIdInTx(tx, userId, limit);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> findByUserIdInTx(txCtx, userId, limit), 5_000);
+    }
+
+    // ================================================================
+    // Context-based (explicit tx) — kept for advanced use cases
+    // ================================================================
+
+    /**
+     * Insert a new payment record — explicit transaction.
+     *
      * @return payment ID
      */
     public Future<Long> insertPayment(TransactionContext tx, Long orderId, Long userId,
-                                       java.math.BigDecimal amount, String method, String status) {
+                                     BigDecimal amount, String method, String status) {
+        return insertPaymentInTx(tx, orderId, userId, amount, method, status);
+    }
+
+    /**
+     * Update payment status — explicit transaction.
+     */
+    public Future<Void> updateStatus(TransactionContext tx, Long paymentId, String status) {
+        return updateStatusInTx(tx, paymentId, status);
+    }
+
+    /**
+     * Find payment by order ID inside a transaction — explicit context.
+     */
+    public Future<JsonObject> findByOrderIdInTx(TransactionContext tx, Long orderId) {
+        tx.tick();
+        String sql = "SELECT * FROM payments WHERE order_id = $1 ORDER BY id DESC LIMIT 1";
+        Tuple params = Tuple.tuple().addLong(orderId);
+        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params);
+    }
+
+    /**
+     * List recent payments for a user inside a transaction — explicit context.
+     */
+    public Future<List<JsonObject>> findByUserIdInTx(TransactionContext tx, Long userId, int limit) {
+        tx.tick();
+        String sql = "SELECT p.*, o.total as order_total FROM payments p " +
+            "LEFT JOIN orders o ON p.order_id = o.id WHERE p.user_id = $1 " +
+            "ORDER BY p.created_at DESC LIMIT $2";
+        Tuple params = Tuple.tuple().addLong(userId).addInteger(limit);
+        return DatabaseVerticle.queryListInTx(tx.conn(), sql, params);
+    }
+
+    // ================================================================
+    // Private internal implementations
+    // ================================================================
+
+    private Future<Long> insertPaymentInTx(TransactionContext tx, Long orderId, Long userId,
+                                            BigDecimal amount, String method, String status) {
         tx.tick();
         String transactionNo = "TXN-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
         String sql = "INSERT INTO payments (order_id, user_id, amount, method, status, transaction_no) " +
@@ -122,12 +201,7 @@ public class PaymentRepository {
             .map(rows -> rows.iterator().next().getLong("id"));
     }
 
-    /**
-     * Update payment status inside a transaction.
-     *
-     * <p>If status transitions to completed/failed, also records completed_at.
-     */
-    public Future<Void> updateStatus(TransactionContext tx, Long paymentId, String status) {
+    private Future<Void> updateStatusInTx(TransactionContext tx, Long paymentId, String status) {
         tx.tick();
         String completedAt = ("completed".equals(status) || "failed".equals(status) || "refunded".equals(status))
             ? "CURRENT_TIMESTAMP" : "NULL";
@@ -136,27 +210,5 @@ public class PaymentRepository {
             completedAt);
         Tuple params = Tuple.tuple().addString(status).addLong(paymentId);
         return DatabaseVerticle.updateInTx(tx.conn(), sql, params).mapEmpty();
-    }
-
-    /**
-     * Find payment by order ID inside a transaction (for idempotency check).
-     */
-    public Future<JsonObject> findByOrderIdInTx(TransactionContext tx, Long orderId) {
-        tx.tick();
-        String sql = "SELECT * FROM payments WHERE order_id = $1 ORDER BY id DESC LIMIT 1";
-        Tuple params = Tuple.tuple().addLong(orderId);
-        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params);
-    }
-
-    /**
-     * List recent payments for a user inside a transaction.
-     */
-    public Future<List<JsonObject>> findByUserIdInTx(TransactionContext tx, Long userId, int limit) {
-        tx.tick();
-        String sql = "SELECT p.*, o.total as order_total FROM payments p " +
-            "LEFT JOIN orders o ON p.order_id = o.id WHERE p.user_id = $1 " +
-            "ORDER BY p.created_at DESC LIMIT $2";
-        Tuple params = Tuple.tuple().addLong(userId).addInteger(limit);
-        return DatabaseVerticle.queryListInTx(tx.conn(), sql, params);
     }
 }

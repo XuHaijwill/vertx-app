@@ -215,6 +215,7 @@ public class DatabaseVerticle extends AbstractVerticle {
                                                 conn.close();
                                                 long ms = System.currentTimeMillis() - startTime;
                                                 LOG.info("[TX] Rollback-only in {}ms ({})", ms, txCtx);
+                                                TxContextHolder.unbind();  // always unbind on completion
                                             })
                                             .compose(v -> Future.<T>failedFuture(
                                                 new RuntimeException("Transaction marked rollback-only")));
@@ -231,6 +232,7 @@ public class DatabaseVerticle extends AbstractVerticle {
                                                 LOG.error("[TX] Commit failed {}ms: {}",
                                                     ms, ar.cause().getMessage());
                                             }
+                                            TxContextHolder.unbind();  // always unbind on completion
                                         })
                                         .map(value);
                                 },
@@ -246,6 +248,7 @@ public class DatabaseVerticle extends AbstractVerticle {
                                             LOG.error("[TX] Rollback failed {}ms: {}",
                                                 ms, rbAr.cause().getMessage());
                                         }
+                                        TxContextHolder.unbind();  // always unbind on completion
                                     })
                                     .compose(v -> Future.<T>failedFuture(err))
                             );
@@ -253,6 +256,7 @@ public class DatabaseVerticle extends AbstractVerticle {
                     .onFailure(f -> {
                         vertx.cancelTimer(timerId);
                         conn.close();
+                        TxContextHolder.unbind();  // unbind even on connection-level failure
                     });
             });
     }

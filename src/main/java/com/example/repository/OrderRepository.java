@@ -2,6 +2,7 @@ package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
+import com.example.db.TxContextHolder;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -15,12 +16,16 @@ import java.util.stream.StreamSupport;
 /**
  * Order Repository — CRUD and transaction-aware operations for orders.
  *
- * <p>Two categories of methods:
- *   1. Pool-based (standalone) — use DatabaseVerticle.query(), no transaction
- *   2. Context-based (transactional) — receive TransactionContext, used inside withTransaction()
+ * <p>Three categories of methods:
+ *   1. <b>Pool-based</b> (standalone) — no transaction, uses connection pool
+ *   2. <b>Auto-route</b> (declarative-tx) — auto-detects {@link TxContextHolder#current()},
+ *      preferred entry points for {@code @Transactional} service methods
+ *   3. <b>Context-based</b> (explicit tx) — receive {@code TransactionContext} parameter,
+ *      kept for advanced use cases that need explicit transaction control
  *
- * <p>Critical: always use {@code findByIdForUpdate} before mutating an order's status
- * inside a transaction, to prevent concurrent modifications (TOCTOU race condition).
+ * <p>Critical TOCTOU rule: always use {@code findByIdForUpdate} (either variant)
+ * before checking or modifying order status inside a transaction.
+ * The FOR UPDATE lock serialises concurrent modifiers.
  */
 public class OrderRepository {
 
@@ -91,16 +96,84 @@ public class OrderRepository {
     }
 
     // ================================================================
-    // Context-based (transactional) methods
+    // Auto-route variants (declarative-transaction — preferred entry points)
+    // These are the cleanest to call from @Transactional service methods.
     // ================================================================
 
     /**
-     * Lock an order row with FOR UPDATE inside a transaction.
+     * Lock order row with FOR UPDATE — auto-detects active transaction.
      *
-     * <p>CRITICAL: Always call this BEFORE checking or modifying order status
-     * in a multi-step transaction. Without this, concurrent requests can both
-     * read the same status and both proceed, causing duplicate state transitions
-     * (TOCTOU race condition).
+     * @see #findByIdForUpdate(TransactionContext, Long)
+     */
+    public Future<JsonObject> findByIdForUpdate(Long orderId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return findByIdForUpdateInTx(tx, orderId);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> findByIdForUpdateInTx(txCtx, orderId), 5_000);
+    }
+
+    /**
+     * Find order items inside a transaction — auto-detects active transaction.
+     *
+     * @return JsonArray (same as the explicit tx version)
+     * @see #findItemsByOrderIdInTx(TransactionContext, Long)
+     */
+    public Future<JsonArray> findItemsByOrderIdForTx(Long orderId) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return findItemsByOrderIdInTx(tx, orderId);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> findItemsByOrderIdInTx(txCtx, orderId), 5_000);
+    }
+
+    /**
+     * Insert an order row — auto-detects active transaction.
+     *
+     * @return the generated order ID
+     * @see #insertOrder(TransactionContext, Long, java.math.BigDecimal, String)
+     */
+    public Future<Long> insertOrder(Long userId, java.math.BigDecimal total, String remark) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return insertOrderInTx(tx, userId, total, remark);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> insertOrderInTx(txCtx, userId, total, remark), 5_000);
+    }
+
+    /**
+     * Insert an order item row — auto-detects active transaction.
+     *
+     * @see #insertItem(TransactionContext, Long, Long, int, java.math.BigDecimal)
+     */
+    public Future<Void> insertItem(Long orderId, Long productId,
+                                   int quantity, java.math.BigDecimal price) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return insertItemInTx(tx, orderId, productId, quantity, price);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> insertItemInTx(txCtx, orderId, productId, quantity, price), 5_000);
+    }
+
+    /**
+     * Update order status — auto-detects active transaction.
+     * Always call {@link #findByIdForUpdate(Long)} first to lock the row.
+     *
+     * @see #updateStatusInTx(TransactionContext, Long, String)
+     */
+    public Future<Void> updateStatus(Long orderId, String status) {
+        TransactionContext tx = TxContextHolder.current();
+        if (tx != null) return updateStatusInTx(tx, orderId, status);
+        return DatabaseVerticle.withTransaction(vertx,
+            txCtx -> updateStatusInTx(txCtx, orderId, status), 5_000);
+    }
+
+    // ================================================================
+    // Context-based (explicit tx) — kept for advanced explicit-control use cases
+    // ================================================================
+
+    /**
+     * Lock an order row with FOR UPDATE — explicit transaction context.
+     *
+     * <p>CRITICAL: Always call this BEFORE checking or modifying order status.
+     * Without FOR UPDATE, concurrent requests can both read the same status
+     * and both proceed, causing duplicate state transitions (TOCTOU race).
      *
      * <p>Example:
      * <pre>
@@ -113,21 +186,11 @@ public class OrderRepository {
      * </pre>
      */
     public Future<JsonObject> findByIdForUpdate(TransactionContext tx, Long orderId) {
-        tx.tick();
-        String sql = "SELECT o.*, u.name as user_name FROM orders o " +
-            "LEFT JOIN users u ON o.user_id = u.id WHERE o.id = $1 FOR UPDATE";
-        Tuple params = Tuple.tuple().addLong(orderId);
-        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params)
-            .map(order -> {
-                if (order == null) {
-                    throw new RuntimeException("Order not found: " + orderId);
-                }
-                return order;
-            });
+        return findByIdForUpdateInTx(tx, orderId);
     }
 
     /**
-     * Find order items inside a transaction.
+     * Find order items inside a transaction — explicit context.
      */
     public Future<JsonArray> findItemsByOrderIdInTx(TransactionContext tx, Long orderId) {
         tx.tick();
@@ -143,12 +206,54 @@ public class OrderRepository {
     }
 
     /**
-     * Insert an order row inside a transaction.
+     * Insert an order row inside a transaction — explicit context.
      *
      * @return the generated order ID
      */
     public Future<Long> insertOrder(TransactionContext tx, Long userId,
                                      java.math.BigDecimal total, String remark) {
+        return insertOrderInTx(tx, userId, total, remark);
+    }
+
+    /**
+     * Insert an order item row inside a transaction — explicit context.
+     */
+    public Future<Void> insertItem(TransactionContext tx, Long orderId, Long productId,
+                                   int quantity, java.math.BigDecimal price) {
+        return insertItemInTx(tx, orderId, productId, quantity, price);
+    }
+
+    /**
+     * Update order status inside a transaction — explicit context.
+     * Always call {@link #findByIdForUpdate(TransactionContext, Long)} first to lock the row.
+     */
+    public Future<Void> updateStatusInTx(TransactionContext tx, Long orderId, String status) {
+        tx.tick();
+        String sql = "UPDATE orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2";
+        Tuple params = Tuple.tuple().addString(status).addLong(orderId);
+        return DatabaseVerticle.updateInTx(tx.conn(), sql, params).mapEmpty();
+    }
+
+    // ================================================================
+    // Private internal implementations (called by both auto-route and explicit)
+    // ================================================================
+
+    private Future<JsonObject> findByIdForUpdateInTx(TransactionContext tx, Long orderId) {
+        tx.tick();
+        String sql = "SELECT o.*, u.name as user_name FROM orders o " +
+            "LEFT JOIN users u ON o.user_id = u.id WHERE o.id = $1 FOR UPDATE";
+        Tuple params = Tuple.tuple().addLong(orderId);
+        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params)
+            .map(order -> {
+                if (order == null) {
+                    throw new RuntimeException("Order not found: " + orderId);
+                }
+                return order;
+            });
+    }
+
+    private Future<Long> insertOrderInTx(TransactionContext tx, Long userId,
+                                         java.math.BigDecimal total, String remark) {
         tx.tick();
         String sql = "INSERT INTO orders (user_id, total, remark) VALUES ($1, $2, $3) RETURNING id";
         Tuple params = Tuple.tuple().addLong(userId).addBigDecimal(total).addString(remark);
@@ -156,26 +261,12 @@ public class OrderRepository {
             .map(rows -> rows.iterator().next().getLong("id"));
     }
 
-    /**
-     * Insert an order item row inside a transaction.
-     */
-    public Future<Void> insertItem(TransactionContext tx, Long orderId, Long productId,
-                                    int quantity, java.math.BigDecimal price) {
+    private Future<Void> insertItemInTx(TransactionContext tx, Long orderId, Long productId,
+                                         int quantity, java.math.BigDecimal price) {
         tx.tick();
         String sql = "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4)";
         Tuple params = Tuple.tuple().addLong(orderId).addLong(productId)
             .addInteger(quantity).addBigDecimal(price);
         return DatabaseVerticle.queryInTx(tx.conn(), sql, params).mapEmpty();
-    }
-
-    /**
-     * Update order status inside a transaction.
-     * Always call {@link #findByIdForUpdate} first to lock the row.
-     */
-    public Future<Void> updateStatusInTx(TransactionContext tx, Long orderId, String status) {
-        tx.tick();
-        String sql = "UPDATE orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2";
-        Tuple params = Tuple.tuple().addString(status).addLong(orderId);
-        return DatabaseVerticle.updateInTx(tx.conn(), sql, params).mapEmpty();
     }
 }
