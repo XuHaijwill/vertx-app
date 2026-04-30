@@ -9,6 +9,8 @@ import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.PoolOptions;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.RowSet;
+import io.vertx.sqlclient.SqlConnection;
+import io.vertx.sqlclient.Transaction;
 import io.vertx.sqlclient.Tuple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,8 +19,6 @@ import java.util.function.Function;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
-
-import io.vertx.sqlclient.Transaction;
 
 /**
  * Database Verticle — PostgreSQL connection pool manager.
@@ -33,6 +33,9 @@ public class DatabaseVerticle extends AbstractVerticle {
     private static final Logger LOG = LoggerFactory.getLogger(DatabaseVerticle.class);
 
     public static final String DB_POOL = "db.pool";
+
+    /** 默认事务超时 30 秒 */
+    public static final int DEFAULT_TX_TIMEOUT_MS = 30_000;
 
     private Pool pool;
 
@@ -51,7 +54,6 @@ public class DatabaseVerticle extends AbstractVerticle {
         LOG.info("[DB] host={}:{}/{} user={} poolSize={} ssl={}",
                  host, port, database, user, poolSize, ssl);
 
-        // Demo mode: host is the default (localhost) AND password is default → no real DB
         boolean demoMode = (host.equals("localhost") && password.equals("postgres"));
 
         if (demoMode) {
@@ -74,7 +76,6 @@ public class DatabaseVerticle extends AbstractVerticle {
             .setEventLoopSize(4)
             .setShared(true);
 
-        // Vert.x 5: PgPool is removed, use PgBuilder.builder().with().connectingTo().using().build()
         pool = PgBuilder.pool()
             .with(poolOpts)
             .connectingTo(connectOptions)
@@ -83,7 +84,6 @@ public class DatabaseVerticle extends AbstractVerticle {
 
         LOG.info("[DB] Connecting to PostgreSQL {}:{}/{}", host, port, database);
 
-        // Run Flyway migrations BEFORE serving traffic
         runMigrations(host, port, database, user, password, ssl)
             .compose(v -> {
                 context.put(DB_POOL, pool);
@@ -128,7 +128,6 @@ public class DatabaseVerticle extends AbstractVerticle {
                     .setMaxSize(10)
                     .setName("vertx-app-pool")
                     .setShared(true);
-                // Vert.x 5: use PgBuilder instead of PgPool.pool()
                 return PgBuilder.pool()
                     .with(poolOpts)
                     .connectingTo(opts)
@@ -158,54 +157,151 @@ public class DatabaseVerticle extends AbstractVerticle {
     // ================================================================
 
     /**
-     * Execute a series of database operations within a transaction.
+     * Execute database operations within a transaction (default 30s timeout).
      *
-     * <p>All operations succeed  → transaction is committed automatically.
-     * Any operation fails       → transaction is rolled back automatically.
-     * The transaction is always closed at the end.
+     * <p>All operations succeed → auto commit. Any failure → auto rollback.
+     * Connection is always returned to the pool after the transaction ends.
+     * If the transaction exceeds the timeout, the connection is force-closed.
      *
      * <p>Usage example:
      * <pre>
-     * return DatabaseVerticle.withTransaction(vertx, tx -&gt;
-     *     tx.preparedQuery("INSERT INTO orders ...").execute(params1)
-     *       .compose(r1 -&gt; tx.preparedQuery("INSERT INTO items ...").execute(params2))
-     *       .map(r2 -&gt; r2.iterator().next().getLong("id"))
+     * return DatabaseVerticle.withTransaction(vertx, conn ->
+     *     conn.preparedQuery("INSERT INTO orders ...").execute(params1)
+     *       .compose(r1 -> conn.preparedQuery("INSERT INTO items ...").execute(params2))
+     *       .map(r2 -> r2.iterator().next().getLong("id"))
      * );
      * </pre>
      *
      * @param vertx  Vert.x instance
-     * @param block  Lambda receiving the Transaction; return a Future representing the work.
-     *               The block must NOT call commit() or rollback() itself — that is
-     *               handled automatically based on the returned Future's outcome.
+     * @param block  Lambda receiving SqlConnection; queries go through conn, NOT through Pool.
+     *               Do NOT call commit/rollback yourself — handled automatically.
      * @param <T>    Result type of the transaction
-     * @return Future that completes with the block's result or fails if any step fails
+     * @return Future that completes with the block's result, or fails if any step fails
      */
     public static <T> Future<T> withTransaction(Vertx vertx,
-                                                  Function<Transaction, Future<T>> block) {
+                                                  Function<SqlConnection, Future<T>> block) {
+        return withTransaction(vertx, block, DEFAULT_TX_TIMEOUT_MS);
+    }
+
+    /**
+     * Execute database operations within a transaction (custom timeout).
+     *
+     * @param vertx     Vert.x instance
+     * @param block     Lambda receiving SqlConnection
+     * @param timeoutMs Timeout in milliseconds; forces connection close on expiry
+     */
+    public static <T> Future<T> withTransaction(Vertx vertx,
+                                                  Function<SqlConnection, Future<T>> block,
+                                                  int timeoutMs) {
         Pool pool = getPool(vertx);
         if (pool == null) {
             return Future.failedFuture("Database not available (demo mode)");
         }
 
+        LOG.debug("[TX] Opening, timeout={}ms", timeoutMs);
+        long startTime = System.currentTimeMillis();
+
         return pool.getConnection()
-            .compose(conn ->
-                conn.begin()
-                    .compose(tx ->
-                        block.apply(tx)
+            .compose(conn -> {
+                // Timeout guard — force close connection if tx takes too long
+                long timerId = vertx.setTimer(timeoutMs, id -> {
+                    LOG.warn("[TX] Timeout after {}ms — force closing connection", timeoutMs);
+                    conn.close();
+                });
+
+                return conn.begin()
+                    .compose(tx -> {
+                        Future<T> result;
+                        try {
+                            result = block.apply(conn);
+                        } catch (Exception e) {
+                            result = Future.failedFuture(e);
+                        }
+
+                        return result
                             .compose(
-                                result -> tx.commit()
-                                    .onComplete(ar -> conn.close())
-                                    .map(result),
+                                // Success → commit
+                                value -> tx.commit()
+                                    .onComplete(ar -> {
+                                        vertx.cancelTimer(timerId);
+                                        conn.close();
+                                        long ms = System.currentTimeMillis() - startTime;
+                                        if (ar.succeeded()) {
+                                            LOG.info("[TX] Committed in {}ms", ms);
+                                        } else {
+                                            LOG.error("[TX] Commit failed in {}ms: {}", ms, ar.cause().getMessage());
+                                        }
+                                    })
+                                    .map(value),
+                                // Failure → rollback
                                 err -> tx.rollback()
-                                    .onComplete(ar -> conn.close())
+                                    .onComplete(rbAr -> {
+                                        vertx.cancelTimer(timerId);
+                                        conn.close();
+                                        long ms = System.currentTimeMillis() - startTime;
+                                        if (rbAr.succeeded()) {
+                                            LOG.warn("[TX] Rolled back in {}ms — {}", ms, err.getMessage());
+                                        } else {
+                                            LOG.error("[TX] Rollback failed in {}ms: {}", ms, rbAr.cause().getMessage());
+                                        }
+                                    })
                                     .compose(v -> Future.<T>failedFuture(err))
-                            )
-                    )
-                    .onFailure(err -> conn.close())
-            )
-            .onFailure(err ->
-                LOG.error("[DB-TX] Transaction failed and was rolled back: {}", err.getMessage()));
+                            );
+                    })
+                    .onFailure(f -> {
+                        vertx.cancelTimer(timerId);
+                        conn.close();
+                    });
+            });
     }
+
+    // ================================================================
+    // Transaction-scoped query helpers
+    // ================================================================
+
+    /**
+     * Execute a prepared query inside a transaction (returns RowSet).
+     */
+    public static Future<RowSet<Row>> queryInTx(SqlConnection conn, String sql, Tuple params) {
+        return conn.preparedQuery(sql).execute(params);
+    }
+
+    public static Future<RowSet<Row>> queryInTx(SqlConnection conn, String sql) {
+        return queryInTx(conn, sql, Tuple.tuple());
+    }
+
+    /**
+     * Execute a prepared query inside a transaction (returns JsonObject list).
+     */
+    public static Future<List<JsonObject>> queryListInTx(SqlConnection conn, String sql, Tuple params) {
+        return queryInTx(conn, sql, params).map(DatabaseVerticle::toJsonList);
+    }
+
+    public static Future<List<JsonObject>> queryListInTx(SqlConnection conn, String sql) {
+        return queryListInTx(conn, sql, Tuple.tuple());
+    }
+
+    /**
+     * Execute a prepared query inside a transaction (returns single JsonObject or null).
+     */
+    public static Future<JsonObject> queryOneInTx(SqlConnection conn, String sql, Tuple params) {
+        return queryInTx(conn, sql, params)
+            .map(rows -> {
+                List<JsonObject> list = toJsonList(rows);
+                return list.isEmpty() ? null : list.get(0);
+            });
+    }
+
+    /**
+     * Execute an UPDATE/INSERT/DELETE inside a transaction (returns affected row count).
+     */
+    public static Future<Long> updateInTx(SqlConnection conn, String sql, Tuple params) {
+        return queryInTx(conn, sql, params).map(rows -> (long) rows.rowCount());
+    }
+
+    // ================================================================
+    // JSON conversion helpers
+    // ================================================================
 
     public static List<JsonObject> toJsonList(RowSet<Row> rows) {
         return StreamSupport.stream(rows.spliterator(), false)
@@ -241,11 +337,8 @@ public class DatabaseVerticle extends AbstractVerticle {
 
     private Future<Void> runMigrations(String host, int port, String database,
                                          String user, String password, boolean ssl) {
-        // Run Flyway migrations on a worker thread to avoid blocking the event-loop
         Promise<Void> p = Promise.promise();
-        // Use the Callable-based executeBlocking overload that returns a Future
         var migrationFuture = vertx.executeBlocking((java.util.concurrent.Callable<Void>) () -> {
-            // This runs on a worker thread; call the synchronous migration helper which may throw
             FlywayMigration.migrateSync(host, port, database, user, password, ssl);
             return null;
         });

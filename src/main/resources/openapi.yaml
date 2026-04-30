@@ -28,6 +28,8 @@ tags:
     description: User management operations
   - name: Products
     description: Product management operations
+  - name: SysConfig
+    description: System configuration management operations
   - name: Auth
     description: Authentication and authorization endpoints
 
@@ -545,6 +547,179 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
   # ================================================================
+  # SYS_CONFIG ENDPOINTS
+  # ================================================================
+  /api/sys-configs:
+    get:
+      tags:
+        - SysConfig
+      summary: List system configurations
+      description: |
+        Returns a paginated list of system configurations.
+        Supports multi-condition filtering with fuzzy search on config_name and config_value.
+      operationId: listSysConfigs
+      parameters:
+        - name: configName
+          in: query
+          description: Filter by config_name (fuzzy search, case-insensitive)
+          required: false
+          schema:
+            type: string
+          example: skin
+        - name: configValue
+          in: query
+          description: Filter by config_value (fuzzy search, case-insensitive)
+          required: false
+          schema:
+            type: string
+          example: blue
+        - name: configKey
+          in: query
+          description: Filter by config_key (exact match)
+          required: false
+          schema:
+            type: string
+          example: sys.index.skinName
+        - name: configType
+          in: query
+          description: Filter by config_type (Y=system built-in, N=user-defined)
+          required: false
+          schema:
+            type: string
+            enum: [Y, N]
+        - name: page
+          in: query
+          description: Page number (1-based)
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: size
+          in: query
+          description: Page size
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: List of system configurations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysConfigsResponse'
+              example:
+                code: success
+                message: Operation successful
+                data:
+                  items:
+                    - config_id: 1
+                      config_name: Default skin name for main layout
+                      config_key: sys.index.skinName
+                      config_value: skin-blue
+                      config_type: Y
+                      create_by: admin
+                      create_time: "2026-04-26T00:00:00"
+                      remark: Default skins blue skin-blue, green skin-green, purple skin-purple, red skin-red, yellow skin-yellow
+                    - config_id: 2
+                      config_name: User management - initial password
+                      config_key: sys.user.initPassword
+                      config_value: "123456"
+                      config_type: Y
+                      create_by: admin
+                      create_time: "2026-04-26T00:00:00"
+                      remark: Initial password 123456
+                  total: 9
+                  page: 1
+                  size: 20
+
+  /api/sys-configs/{id}:
+    get:
+      tags:
+        - SysConfig
+      summary: Get configuration by ID
+      description: Returns a single system configuration by its config_id
+      operationId: getSysConfigById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Configuration ID
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        '200':
+          description: Configuration found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysConfigResponse'
+              example:
+                code: success
+                data:
+                  config_id: 1
+                  config_name: Default skin name for main layout
+                  config_key: sys.index.skinName
+                  config_value: skin-blue
+                  config_type: Y
+                  create_by: admin
+                  create_time: "2026-04-26T00:00:00"
+                  update_by: ""
+                  update_time: null
+                  remark: Default skins blue skin-blue, green skin-green, purple skin-purple, red skin-red, yellow skin-yellow
+        '404':
+          description: Configuration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: NOT_FOUND
+                message: Config not found 999
+
+  /api/sys-configs/key/{configKey}:
+    get:
+      tags:
+        - SysConfig
+      summary: Get configuration by key
+      description: Returns a single system configuration by its config_key (exact match)
+      operationId: getSysConfigByKey
+      parameters:
+        - name: configKey
+          in: path
+          required: true
+          description: Configuration key
+          schema:
+            type: string
+          example: sys.user.initPassword
+      responses:
+        '200':
+          description: Configuration found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysConfigResponse'
+              example:
+                code: success
+                data:
+                  config_id: 2
+                  config_name: User management - initial password
+                  config_key: sys.user.initPassword
+                  config_value: "123456"
+                  config_type: Y
+        '404':
+          description: Configuration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ================================================================
   # INFO ENDPOINT
   # ================================================================
   /api/info:
@@ -838,3 +1013,89 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Product'
+
+    # SysConfig schemas
+    SysConfig:
+      type: object
+      properties:
+        config_id:
+          type: integer
+          format: int64
+          description: Configuration ID
+          example: 1
+        config_name:
+          type: string
+          description: Configuration name/description
+          example: Default skin name for main layout
+        config_key:
+          type: string
+          description: Configuration key (unique identifier)
+          example: sys.index.skinName
+        config_value:
+          type: string
+          description: Configuration value
+          example: skin-blue
+        config_type:
+          type: string
+          description: Configuration type (Y=system built-in, N=user-defined)
+          enum: [Y, N]
+          example: Y
+        create_by:
+          type: string
+          description: Creator username
+          example: admin
+        create_time:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        update_by:
+          type: string
+          description: Last updater username
+          example: ""
+        update_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last update timestamp
+        remark:
+          type: string
+          nullable: true
+          description: Configuration description/notes
+          example: Default skins blue skin-blue, green skin-green, purple skin-purple, red skin-red, yellow skin-yellow
+
+    PageResultSysConfig:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SysConfig'
+        total:
+          type: integer
+          format: int64
+          description: Total number of matching records
+          example: 9
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        size:
+          type: integer
+          description: Page size
+          example: 20
+
+    SysConfigResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/SysConfig'
+
+    SysConfigsResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/PageResultSysConfig'

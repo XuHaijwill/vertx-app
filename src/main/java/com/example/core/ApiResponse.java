@@ -17,6 +17,14 @@ public class ApiResponse {
     private long timestamp;
     private long duration;
 
+    // Customizable key mapping (defaults)
+    private static io.vertx.core.json.JsonObject keys = new io.vertx.core.json.JsonObject()
+        .put("code", "code")
+        .put("message", "message")
+        .put("data", "data")
+        .put("timestamp", "timestamp")
+        .put("duration", "duration");
+
     public ApiResponse() {
         this.timestamp = System.currentTimeMillis();
     }
@@ -67,13 +75,35 @@ public class ApiResponse {
     // ========== Convert to JSON ==========
 
     public JsonObject toJson() {
-        JsonObject json = new JsonObject()
-            .put("code", code)
-            .put("message", message)
-            .put("timestamp", timestamp);
-        if (data != null) json.put("data", data);
-        if (duration > 0) json.put("duration", duration);
+        JsonObject json = new JsonObject();
+        // Use configured keys (fall back to defaults)
+        String kCode = keys.getString("code", "code");
+        String kMsg = keys.getString("message", "message");
+        String kData = keys.getString("data", "data");
+        String kTs = keys.getString("timestamp", "timestamp");
+        String kDur = keys.getString("duration", "duration");
+
+        json.put(kCode, code).put(kMsg, message).put(kTs, timestamp);
+        if (data != null) json.put(kData, data);
+        if (duration > 0) json.put(kDur, duration);
         return json;
+    }
+
+    /**
+     * Configure response key mapping from application config. Expecting config
+     * structure: response: { keys: { code: "status", message: "msg", data: "payload" } }
+     */
+    public static void configure(io.vertx.core.json.JsonObject config) {
+        if (config == null) return;
+        io.vertx.core.json.JsonObject resp = config.getJsonObject("response");
+        if (resp == null) return;
+        io.vertx.core.json.JsonObject k = resp.getJsonObject("keys");
+        if (k == null) return;
+        // Merge provided keys into defaults
+        for (String field : k.fieldNames()) {
+            String val = k.getString(field);
+            if (val != null && !val.isEmpty()) keys.put(field, val);
+        }
     }
 
     // ========== Getters & Setters ==========
