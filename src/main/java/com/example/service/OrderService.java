@@ -2,10 +2,13 @@ package com.example.service;
 
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
+import com.example.db.AuditAction;
+import com.example.db.AuditLogger;
 import com.example.db.DatabaseVerticle;
 import com.example.db.Transactional;
 import com.example.db.TransactionTemplate;
 import com.example.db.TransactionContext;
+import com.example.db.TxContextHolder;
 import com.example.repository.InventoryTransactionRepository;
 import com.example.repository.OrderRepository;
 import com.example.repository.ProductRepository;
@@ -63,6 +66,7 @@ public class OrderService {
     private final ProductRepository productRepo;
     private final InventoryTransactionRepository invTxRepo;
     private final UserRepository userRepo;
+    private final AuditLogger audit;
     private final Vertx vertx;
     private final boolean dbAvailable;
 
@@ -73,6 +77,7 @@ public class OrderService {
         this.productRepo = new ProductRepository(vertx);
         this.invTxRepo = new InventoryTransactionRepository(vertx);
         this.userRepo = new UserRepository(vertx);
+        this.audit = new AuditLogger(vertx);
         this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
 
@@ -139,7 +144,21 @@ public class OrderService {
             // Step 4: Deduct stock + record ledger per item
             .compose(orderId -> deductStockSequence(orderId, items, 0)
                 .map(orderId))
-            // Step 5: Build result
+            // Step 5: Audit log (模式A: 事务内)
+            .compose(orderId -> {
+                JsonObject orderSummary = new JsonObject()
+                    .put("id", orderId)
+                    .put("userId", userId)
+                    .put("total", orderTotal)
+                    .put("itemCount", itemCount)
+                    .put("status", "pending");
+                return audit.logInTx(TxContextHolder.current(),
+                        AuditAction.AUDIT_CREATE, "orders",
+                        String.valueOf(orderId),
+                        null, orderSummary)
+                    .map(orderId);
+            })
+            // Step 6: Build result
             .map(orderId -> new JsonObject()
                 .put("id", orderId)
                 .put("userId", userId)
@@ -199,6 +218,16 @@ public class OrderService {
             // Update status — no tx param!
             .compose(order -> orderRepo.updateStatus(orderId, "cancelled")
                 .map(order))
+            // Audit log (模式A: 事务内)
+            .compose(order -> {
+                JsonObject oldVal = order.copy();
+                JsonObject newVal = order.copy().put("status", "cancelled");
+                return audit.logInTx(TxContextHolder.current(),
+                        AuditAction.AUDIT_UPDATE, "orders",
+                        String.valueOf(orderId),
+                        oldVal, newVal)
+                    .map(order);
+            })
             .onSuccess(result -> LOG.info("[ORDER] Cancelled id={}", orderId))
             .onFailure(err -> LOG.error("[ORDER] Cancel failed: {}", err.getMessage()));
     }

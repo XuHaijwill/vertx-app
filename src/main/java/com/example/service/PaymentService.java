@@ -1,6 +1,8 @@
 package com.example.service;
 
 import com.example.core.BusinessException;
+import com.example.db.AuditAction;
+import com.example.db.AuditLogger;
 import com.example.db.DatabaseVerticle;
 import com.example.db.Transactional;
 import com.example.db.TransactionContext;
@@ -45,6 +47,7 @@ public class PaymentService {
     private final UserRepository userRepo;
     private final ProductRepository productRepo;
     private final InventoryTransactionRepository invTxRepo;
+    private final AuditLogger audit;
     private final Vertx vertx;
     private final boolean dbAvailable;
 
@@ -56,6 +59,7 @@ public class PaymentService {
         this.userRepo = new UserRepository(vertx);
         this.productRepo = new ProductRepository(vertx);
         this.invTxRepo = new InventoryTransactionRepository(vertx);
+        this.audit = new AuditLogger(vertx);
         this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
 
@@ -134,15 +138,22 @@ public class PaymentService {
                     .map(order))
             // Step 5: Update order status
             .compose(order -> orderRepo.updateStatus(orderId, "completed").map(order))
-            // Step 6: Confirm stock + record inventory ledger
-            .compose(order -> confirmStockAndLedger(orderId).map(order))
-            // Step 7: Increment user order_count
-            .compose(order -> {
+            // Step 6: Audit log for payment creation (模式A: 事务内)
+            .compose(order -> paymentRepo.findByOrderIdForTx(orderId)
+                .compose((JsonObject payment) -> audit.logInTx(TxContextHolder.current(),
+                        AuditAction.AUDIT_CREATE, "payments",
+                        String.valueOf(payment.getLong("id")),
+                        null, payment)
+                    .map(payment)))
+            // Step 7: Confirm stock + record inventory ledger
+            .compose((JsonObject order) -> confirmStockAndLedger(orderId).map(order))
+            // Step 8: Increment user order_count
+            .compose((JsonObject order) -> {
                 Long userId = order.getLong("user_id");
                 return userRepo.updateUserOrderCount(userId, 1).map(order);
             })
-            // Step 8: Return enriched payment record
-            .compose(order ->
+            // Step 9: Return enriched payment record
+            .compose((JsonObject order) ->
                 paymentRepo.findByOrderIdForTx(orderId)
                     .map(payment -> payment.copy()
                         .put("orderTotal", order.getString("total"))
@@ -199,14 +210,24 @@ public class PaymentService {
                 return Future.succeededFuture(payment);
             })
             // Step 3: Update payment status → refunded
-            .compose(payment -> paymentRepo.updatePaymentStatus(paymentId, "refunded").map(payment))
+            .compose((JsonObject payment) -> paymentRepo.updatePaymentStatus(paymentId, "refunded").map(payment))
             // Step 4: Update order status → refunded
-            .compose(payment -> {
+            .compose((JsonObject payment) -> {
                 Long orderId = payment.getLong("order_id");
                 return orderRepo.updateStatus(orderId, "refunded").map(payment);
             })
-            // Step 5: Return enriched payment
-            .compose(payment -> findPaymentEnriched(paymentId).map(p -> p != null ? p : payment))
+            // Step 5: Audit log (模式A: 事务内)
+            .compose((JsonObject payment) -> {
+                JsonObject oldVal = payment.copy();
+                JsonObject newVal = payment.copy().put("status", "refunded");
+                return audit.logInTx(TxContextHolder.current(),
+                        AuditAction.AUDIT_UPDATE, "payments",
+                        String.valueOf(paymentId),
+                        oldVal, newVal)
+                    .map(payment);
+            })
+            // Step 6: Return enriched payment
+            .compose((JsonObject payment) -> findPaymentEnriched(paymentId).map(p -> p != null ? p : payment))
             .onSuccess(result -> LOG.info("[PAY] Refunded: paymentId={}", paymentId))
             .onFailure(err -> LOG.error("[PAY] Refund failed: paymentId={}, err={}", paymentId, err.getMessage()));
     }

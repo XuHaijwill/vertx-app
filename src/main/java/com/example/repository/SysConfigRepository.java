@@ -151,6 +151,81 @@ public class SysConfigRepository {
             .map(rows -> rows.iterator().next().getLong("count"));
     }
 
+    /**
+     * Check if config_key exists
+     */
+    public Future<Boolean> existsByConfigKey(String configKey) {
+        String sql = "SELECT COUNT(*) as count FROM sys_config WHERE config_key = $1";
+        Tuple params = Tuple.tuple().addString(configKey);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> rows.iterator().next().getLong("count") > 0);
+    }
+
+    // ================================================================
+    // MUTATION OPERATIONS
+    // ================================================================
+
+    /**
+     * Create a new config
+     */
+    public Future<JsonObject> create(JsonObject config) {
+        String sql = """
+            INSERT INTO sys_config (config_key, config_name, config_value, config_type, description)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *
+            """;
+        Tuple params = Tuple.tuple()
+            .addString(config.getString("configKey"))
+            .addString(config.getString("configName"))
+            .addString(config.getString("configValue"))
+            .addString(config.getString("configType", "Y"))
+            .addString(config.getString("description"));
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> {
+                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
+                return list.isEmpty() ? null : list.get(0);
+            });
+    }
+
+    /**
+     * Update an existing config
+     */
+    public Future<JsonObject> update(Long configId, JsonObject config) {
+        String sql = """
+            UPDATE sys_config
+            SET config_key = COALESCE($2, config_key),
+                config_name = COALESCE($3, config_name),
+                config_value = COALESCE($4, config_value),
+                config_type = COALESCE($5, config_type),
+                description = COALESCE($6, description),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE config_id = $1
+            RETURNING *
+            """;
+        Tuple params = Tuple.tuple()
+            .addLong(configId)
+            .addString(config.getString("configKey"))
+            .addString(config.getString("configName"))
+            .addString(config.getString("configValue"))
+            .addString(config.getString("configType"))
+            .addString(config.getString("description"));
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> {
+                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
+                return list.isEmpty() ? null : list.get(0);
+            });
+    }
+
+    /**
+     * Delete a config by ID
+     */
+    public Future<Void> delete(Long configId) {
+        String sql = "DELETE FROM sys_config WHERE config_id = $1";
+        Tuple params = Tuple.tuple().addLong(configId);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .mapEmpty();
+    }
+
     // ================================================================
     // PAGINATION
     // ================================================================

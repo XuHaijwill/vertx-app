@@ -22,15 +22,15 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Main Verticle �?HTTP server entry point.
- *
+ * Main Verticle �?HTTP server entry point.
+ * <p>
  * Responsibilities:
  * - Deploy DatabaseVerticle
  * - Bootstrap Vert.x Router with global handlers
  * - Register API modules (HealthApi, UserApi, ProductApi, DocsApi)
  * - Start HTTP server
- *
- * All business logic lives in com.example.api.* �?add new API modules here.
+ * <p>
+ * All business logic lives in com.example.api.* �?add new API modules here.
  */
 public class MainVerticle extends AbstractVerticle {
 
@@ -47,23 +47,29 @@ public class MainVerticle extends AbstractVerticle {
         // Configure ApiResponse key mapping from application config (optional)
         ApiResponse.configure(config());
         deployDatabaseVerticle()
-            .compose(v -> deploySchedulerVerticle())
-            .compose(v -> createRouter())
-            .compose(router -> startServer(router))
-            .onSuccess(port -> printBanner(port))
-            .onSuccess(port -> startPromise.complete())
-            .onFailure(err -> {
-                LOG.error("[FAIL] Startup failed", err);
-                startPromise.fail(err);
-            });
+                .compose(v -> deploySchedulerVerticle())
+                .compose(v -> createRouter())
+                .compose(router -> startServer(router))
+                .onSuccess(port -> printBanner(port))
+                .onSuccess(port -> startPromise.complete())
+                .onFailure(err -> {
+                    LOG.error("[FAIL] Startup failed", err);
+                    startPromise.fail(err);
+                });
     }
 
     @Override
     public void stop(Promise<Void> stopPromise) {
-        if (server == null) { stopPromise.complete(); return; }
+        if (server == null) {
+            stopPromise.complete();
+            return;
+        }
         server.close()
-            .onSuccess(v -> { LOG.info("[OK] Server stopped"); stopPromise.complete(); })
-            .onFailure(stopPromise::fail);
+                .onSuccess(v -> {
+                    LOG.info("[OK] Server stopped");
+                    stopPromise.complete();
+                })
+                .onFailure(stopPromise::fail);
     }
 
     // ================================================================
@@ -73,9 +79,15 @@ public class MainVerticle extends AbstractVerticle {
     private Future<Void> deployDatabaseVerticle() {
         Promise<Void> p = Promise.promise();
         vertx.deployVerticle("com.example.db.DatabaseVerticle",
-                new io.vertx.core.DeploymentOptions().setConfig(config()))
-            .onSuccess(id -> { LOG.info("[OK] DatabaseVerticle deployed"); p.complete(); })
-            .onFailure(err -> { LOG.warn("[WARN] DatabaseVerticle failed �?demo mode: {}", err.getMessage()); p.complete(); });
+                        new io.vertx.core.DeploymentOptions().setConfig(config()))
+                .onSuccess(id -> {
+                    LOG.info("[OK] DatabaseVerticle deployed");
+                    p.complete();
+                })
+                .onFailure(err -> {
+                    LOG.warn("[WARN] DatabaseVerticle failed �?demo mode: {}", err.getMessage());
+                    p.complete();
+                });
         return p.future();
     }
 
@@ -86,9 +98,15 @@ public class MainVerticle extends AbstractVerticle {
         }
         Promise<Void> p = Promise.promise();
         vertx.deployVerticle("com.example.verticles.SchedulerVerticle",
-                new io.vertx.core.DeploymentOptions().setConfig(config()))
-            .onSuccess(id -> { LOG.info("[OK] SchedulerVerticle deployed"); p.complete(); })
-            .onFailure(err -> { LOG.warn("[WARN] SchedulerVerticle failed �?continuing: {}", err.getMessage()); p.complete(); });
+                        new io.vertx.core.DeploymentOptions().setConfig(config()))
+                .onSuccess(id -> {
+                    LOG.info("[OK] SchedulerVerticle deployed");
+                    p.complete();
+                })
+                .onFailure(err -> {
+                    LOG.warn("[WARN] SchedulerVerticle failed �?continuing: {}", err.getMessage());
+                    p.complete();
+                });
         return p.future();
     }
 
@@ -104,12 +122,12 @@ public class MainVerticle extends AbstractVerticle {
 
         // Setup Keycloak auth if enabled
         return setupAuth(router, contextPath)
-            .map(authHandler -> {
-                registerApis(router, authHandler, contextPath);
-                addErrorHandlers(router);
-                LOG.info("[OK] Router created with context-path: '{}'", contextPath);
-                return router;
-            });
+                .map(authHandler -> {
+                    registerApis(router, authHandler, contextPath);
+                    addErrorHandlers(router);
+                    LOG.info("[OK] Router created with context-path: '{}'", contextPath);
+                    return router;
+                });
     }
 
     /**
@@ -120,40 +138,44 @@ public class MainVerticle extends AbstractVerticle {
         AuthConfig authConfig = AuthConfig.from(config());
 
         if (!authConfig.isEnabled()) {
-            LOG.info("[AUTH] Authentication disabled �?all endpoints are open");
+            LOG.info("[AUTH] Authentication disabled �?all endpoints are open");
             return Future.succeededFuture(null);
         }
 
-        LOG.info("[AUTH] Authentication enabled �?issuer={}, clientId={}",
-            authConfig.getIssuer(), authConfig.getClientId());
+        LOG.info("[AUTH] Authentication enabled �?issuer={}, clientId={}",
+                authConfig.getIssuer(), authConfig.getClientId());
 
         // Paths that skip authentication (加上 context-path 前缀)
         Set<String> skipPaths = new HashSet<>(java.util.Arrays.asList(
-            contextPath + "/health",
-            contextPath + "/health/",
-            contextPath + "/docs",
-            contextPath + "/swagger-ui/",
-            contextPath + "/openapi.yaml",
-            contextPath + "/api/auth/config",
-            contextPath + "/api/info",
-            // User API 白名单（方便测试�?            contextPath + "/api/users",
-            contextPath + "/api/users/"
+                contextPath + "/health",
+                contextPath + "/health/",
+                contextPath + "/docs",
+                contextPath + "/swagger-ui/",
+                contextPath + "/openapi.yaml",
+                contextPath + "/api/auth/config",
+                contextPath + "/api/info",
+                // User API 白名单（方便测试�?            contextPath + "/api/users",
+                contextPath + "/api/users/",
+                contextPath + "/api/products",
+                contextPath + "/api/products/"
         ));
 
         return KeycloakAuthHandler.create(vertx, authConfig, skipPaths)
-            .onSuccess(handler -> {
-                // Apply auth handler to /api/* routes under context-path
-                router.route(contextPath + "/api/*").handler(handler);
-                LOG.info("[AUTH] Keycloak auth handler installed on {}/api/*", contextPath);
-            })
-            .onFailure(err -> {
-                LOG.error("[AUTH] Failed to setup Keycloak auth: {}", err.getMessage());
-                LOG.warn("[AUTH] Continuing without authentication");
-            })
-            .recover(err -> Future.succeededFuture(null));
+                .onSuccess(handler -> {
+                    // Apply auth handler to /api/* routes under context-path
+                    router.route(contextPath + "/api/*").handler(handler);
+                    LOG.info("[AUTH] Keycloak auth handler installed on {}/api/*", contextPath);
+                })
+                .onFailure(err -> {
+                    LOG.error("[AUTH] Failed to setup Keycloak auth: {}", err.getMessage());
+                    LOG.warn("[AUTH] Continuing without authentication");
+                })
+                .recover(err -> Future.succeededFuture(null));
     }
 
-    /** Register all API modules. Add new API classes here. */
+    /**
+     * Register all API modules. Add new API classes here.
+     */
     private void registerApis(Router router, KeycloakAuthHandler authHandler, String contextPath) {
         AuthConfig authConfig = AuthConfig.from(config());
 
@@ -181,16 +203,16 @@ public class MainVerticle extends AbstractVerticle {
 
         // CORS
         Set<HttpMethod> methods = new HashSet<>(List.of(
-            HttpMethod.GET, HttpMethod.POST, HttpMethod.PUT,
-            HttpMethod.DELETE, HttpMethod.PATCH, HttpMethod.OPTIONS));
+                HttpMethod.GET, HttpMethod.POST, HttpMethod.PUT,
+                HttpMethod.DELETE, HttpMethod.PATCH, HttpMethod.OPTIONS));
         Set<String> headers = new HashSet<>(List.of(
-            "x-requested-with", "origin", "Content-Type", "accept",
-            "Authorization", "X-Request-ID"));
+                "x-requested-with", "origin", "Content-Type", "accept",
+                "Authorization", "X-Request-ID"));
         router.route().handler(CorsHandler.create()
-            .addOrigin("*")
-            .allowedHeaders(headers)
-            .allowedMethods(methods)
-            .maxAgeSeconds(86400));
+                .addOrigin("*")
+                .allowedHeaders(headers)
+                .allowedMethods(methods)
+                .maxAgeSeconds(86400));
 
         // Request body parsing
         router.route().handler(BodyHandler.create());
@@ -211,7 +233,7 @@ public class MainVerticle extends AbstractVerticle {
 
     private void addErrorHandlers(Router router) {
         router.errorHandler(404, ctx ->
-            ctx.json(ApiResponse.error("NOT_FOUND", "Endpoint not found: " + ctx.request().path()).toJson()));
+                ctx.json(ApiResponse.error("NOT_FOUND", "Endpoint not found: " + ctx.request().path()).toJson()));
         router.errorHandler(500, ctx -> {
             LOG.error("500 Error", ctx.failure());
             ctx.json(ApiResponse.error("INTERNAL_ERROR", "Internal server error").toJson());
@@ -231,17 +253,20 @@ public class MainVerticle extends AbstractVerticle {
 
     private void attemptListen(Router router, int port, int attempts, Promise<Integer> p) {
         vertx.createHttpServer().requestHandler(router).listen(port)
-            .onSuccess(srv -> { server = srv; p.complete(port); })
-            .onFailure(err -> {
-                boolean bind = err instanceof java.net.BindException ||
-                    (err.getMessage() != null && err.getMessage().toLowerCase().contains("address already in use"));
-                if (bind && attempts < 10) {
-                    LOG.warn("Port {} in use �?trying {}", port, port + 1);
-                    attemptListen(router, port + 1, attempts + 1, p);
-                } else {
-                    p.fail(err);
-                }
-            });
+                .onSuccess(srv -> {
+                    server = srv;
+                    p.complete(port);
+                })
+                .onFailure(err -> {
+                    boolean bind = err instanceof java.net.BindException ||
+                            (err.getMessage() != null && err.getMessage().toLowerCase().contains("address already in use"));
+                    if (bind && attempts < 10) {
+                        LOG.warn("Port {} in use �?trying {}", port, port + 1);
+                        attemptListen(router, port + 1, attempts + 1, p);
+                    } else {
+                        p.fail(err);
+                    }
+                });
     }
 
     // ================================================================
@@ -267,8 +292,8 @@ public class MainVerticle extends AbstractVerticle {
         LOG.info("+  Swagger:   {}/docs                      +", baseUrl);
         LOG.info("+------------------------------------------------------------+");
         LOG.info("+  Profile:   {}  |  DB: {}  |  Java: {}        +",
-            padRight(profile.isEmpty() ? "(default)" : profile, 10), dbStatus,
-            System.getProperty("java.version"));
+                padRight(profile.isEmpty() ? "(default)" : profile, 10), dbStatus,
+                System.getProperty("java.version"));
         LOG.info("+  Context:   {}                                 +", contextPath.isEmpty() ? "(none)" : contextPath);
         LOG.info("+============================================================+");
     }

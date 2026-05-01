@@ -19,7 +19,7 @@ db:
 auth:
   enabled: true
   realm: uat
-  auth-server-url: https://keycloak-uat.example.com
+  auth-server-url: http://192.168.60.134:8080
   client-id: vertx-app
   audience: vertx-app
   public-client: true

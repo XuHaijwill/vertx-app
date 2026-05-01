@@ -213,4 +213,59 @@ public class AuditRepository {
         return DatabaseVerticle.query(vertx, "SELECT COUNT(*) as count FROM audit_logs")
             .map(rows -> rows.iterator().next().getLong("count"));
     }
+
+    // ================================================================
+    // Archive operations
+    // ================================================================
+
+    /**
+     * Get archive statistics: counts for active and archived tables.
+     */
+    public Future<JsonObject> getArchiveStats() {
+        String sql = """
+            SELECT
+                (SELECT COUNT(*) FROM audit_logs) AS active_count,
+                (SELECT COUNT(*) FROM audit_logs_archive) AS archived_count,
+                (SELECT MIN(created_at) FROM audit_logs) AS oldest_active,
+                (SELECT MIN(created_at) FROM audit_logs_archive) AS oldest_archived,
+                (SELECT COUNT(*) FROM audit_logs WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '6 months') AS eligible_for_archive
+            """;
+        return DatabaseVerticle.query(vertx, sql)
+            .map(rows -> {
+                var row = rows.iterator().next();
+                return new JsonObject()
+                    .put("activeCount", row.getLong("active_count"))
+                    .put("archivedCount", row.getLong("archived_count"))
+                    .put("oldestActive", row.getValue("oldest_active"))
+                    .put("oldestArchived", row.getValue("oldest_archived"))
+                    .put("eligibleForArchive", row.getLong("eligible_for_archive"));
+            });
+    }
+
+    /**
+     * Archive old audit logs to audit_logs_archive table.
+     *
+     * @param monthsOld  archive logs older than N months (default 6)
+     * @param batchSize  batch size for each iteration (default 10000)
+     * @return Future with the total number of archived records
+     */
+    public Future<Long> archiveOldLogs(int monthsOld, int batchSize) {
+        String sql = "SELECT archive_audit_logs($1, $2) AS archived_count";
+        Tuple params = Tuple.tuple().addInteger(monthsOld).addInteger(batchSize);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> rows.iterator().next().getLong("archived_count"));
+    }
+
+    /**
+     * Purge old archived logs (default: older than 3 years).
+     *
+     * @param yearsOld  purge archived logs older than N years
+     * @return Future with the number of deleted records
+     */
+    public Future<Long> purgeOldArchives(int yearsOld) {
+        String sql = "SELECT purge_old_audit_logs($1) AS deleted_count";
+        Tuple params = Tuple.tuple().addInteger(yearsOld);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> rows.iterator().next().getLong("deleted_count"));
+    }
 }

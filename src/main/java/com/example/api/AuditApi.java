@@ -50,6 +50,12 @@ public class AuditApi extends BaseApi {
 
         // Summary statistics
         router.get(prefix + "/audit-logs/stats/summary").handler(this::summary);
+
+        // Archive statistics
+        router.get(prefix + "/audit-logs/stats/archive").handler(this::archiveStats);
+
+        // Manual archive trigger (admin only)
+        router.post(prefix + "/audit-logs/archive").handler(this::triggerArchive);
     }
 
     // ================================================================
@@ -147,4 +153,37 @@ public class AuditApi extends BaseApi {
             .onSuccess(stats -> ctx.json(ApiResponse.success(stats).toJson()))
             .onFailure(err -> fail(ctx, err));
     }
+
+    // ================================================================
+    // GET /api/audit-logs/stats/archive (archive statistics)
+    // ================================================================
+
+    private void archiveStats(RoutingContext ctx) {
+        auditRepo.getArchiveStats()
+            .onSuccess(stats -> ctx.json(ApiResponse.success(stats).toJson()))
+            .onFailure(err -> fail(ctx, err));
+    }
+
+    // ================================================================
+    // POST /api/audit-logs/archive (manual archive trigger)
+    // ================================================================
+
+    private void triggerArchive(RoutingContext ctx) {
+        JsonObject body = ctx.body().asJsonObject();
+        int monthsOld = (body != null && body.containsKey("monthsOld"))
+            ? body.getInteger("monthsOld") : 6;
+        int batchSize = (body != null && body.containsKey("batchSize"))
+            ? body.getInteger("batchSize") : 10000;
+
+        auditRepo.archiveOldLogs(monthsOld, batchSize)
+            .onSuccess(count -> {
+                JsonObject result = new JsonObject()
+                    .put("archivedCount", count)
+                    .put("monthsOld", monthsOld);
+                ctx.json(ApiResponse.success(result).toJson());
+            })
+            .onFailure(err -> fail(ctx, err));
+    }
+
+    // 使用 BaseApi 的 protected fail 方法，无需重复定义
 }
