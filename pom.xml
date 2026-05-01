@@ -22,11 +22,11 @@
 
     <dependencies>
         <!-- Vert.x Core -->
-        <dependency>
+       <!-- <dependency>
             <groupId>io.vertx</groupId>
             <artifactId>vertx-core</artifactId>
             <version>${vertx.version}</version>
-        </dependency>
+        </dependency>-->
 
         <!-- Vert.x Web -->
         <dependency>

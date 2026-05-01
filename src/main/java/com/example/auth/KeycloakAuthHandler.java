@@ -3,13 +3,17 @@ package com.example.auth;
 import com.example.cache.TokenCacheManager;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.auth.JWTOptions;
+import io.vertx.ext.auth.authentication.AuthenticationProvider;
 import io.vertx.ext.auth.authentication.Credentials;
 import io.vertx.ext.auth.authentication.TokenCredentials;
-import io.vertx.ext.auth.oauth2.OAuth2Auth;
-import io.vertx.ext.auth.oauth2.OAuth2Options;
-import io.vertx.core.Handler;
+import io.vertx.ext.auth.jwt.JWTAuth;
+import io.vertx.ext.auth.jwt.JWTAuthOptions;
+import io.vertx.ext.web.client.HttpResponse;
+import io.vertx.ext.web.client.WebClient;
+import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.RoutingContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,43 +24,27 @@ import java.util.stream.Collectors;
 /**
  * Keycloak JWT Authentication Handler for Vert.x 5.
  *
- * <p>Validates Bearer tokens against a Keycloak JWKS endpoint.
- * On successful validation, stores user info in the routing context
- * for downstream handlers to access.</p>
+ * <p>Validates Bearer tokens using JWTAuth with JWKS keys fetched
+ * from the Keycloak /protocol/openid-connect/certs endpoint.
+ * On successful validation, stores user info in the routing context.</p>
  *
  * <h3>Cache Strategy:</h3>
  * <p>Uses Ehcache to cache validated tokens. When a token is validated successfully,
  * the user info (principal, roles, username) is cached until the token expires.
  * Subsequent requests with the same token will use cached data, avoiding
  * repeated JWKS validation calls.</p>
- *
- * <h3>Usage in MainVerticle:</h3>
- * <pre>
- * KeycloakAuthHandler auth = KeycloakAuthHandler.create(vertx, authConfig);
- * // Protect specific routes
- * router.route("/api/*").handler(auth);
- * // Or skip health endpoints
- * router.route("/api/users/*").handler(auth);
- * </pre>
- *
- * <h3>Accessing user info in downstream handlers:</h3>
- * <pre>
- * JsonObject user = ctx.get("user");
- * String username = ctx.get("preferred_username");
- * Set&lt;String&gt; roles = ctx.get("roles");
- * </pre>
  */
-public class KeycloakAuthHandler implements Handler<RoutingContext> {
+public class KeycloakAuthHandler implements io.vertx.core.Handler<RoutingContext> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KeycloakAuthHandler.class);
 
-    private final OAuth2Auth oauth2;
+    private final AuthenticationProvider authProvider;
     private final AuthConfig authConfig;
     private final Set<String> skipPaths;
     private final TokenCacheManager cacheManager;
 
-    private KeycloakAuthHandler(OAuth2Auth oauth2, AuthConfig authConfig, Set<String> skipPaths) {
-        this.oauth2 = oauth2;
+    private KeycloakAuthHandler(AuthenticationProvider authProvider, AuthConfig authConfig, Set<String> skipPaths) {
+        this.authProvider = authProvider;
         this.authConfig = authConfig;
         this.skipPaths = skipPaths;
         this.cacheManager = TokenCacheManager.getInstance();
@@ -64,10 +52,7 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
 
     /**
      * Create a KeycloakAuthHandler with the given config.
-     *
-     * @param vertx      Vert.x instance
-     * @param authConfig Keycloak authentication configuration
-     * @return Future of KeycloakAuthHandler (async because JWKS needs to be fetched)
+     * Async — fetches JWKS keys on startup.
      */
     public static Future<KeycloakAuthHandler> create(Vertx vertx, AuthConfig authConfig) {
         return create(vertx, authConfig, Collections.emptySet());
@@ -75,46 +60,66 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
 
     /**
      * Create a KeycloakAuthHandler with paths to skip (e.g. health endpoints).
-     *
-     * @param vertx      Vert.x instance
-     * @param authConfig Keycloak authentication configuration
-     * @param skipPaths  Set of path prefixes to skip authentication for
-     * @return Future of KeycloakAuthHandler
+     * Fetches JWKS keys from the Keycloak certs endpoint.
      */
     public static Future<KeycloakAuthHandler> create(Vertx vertx, AuthConfig authConfig, Set<String> skipPaths) {
-        LOG.info("[AUTH] Initializing Keycloak OAuth2 - issuer={}, jwksUri={}, clientId={}",
-            authConfig.getIssuer(), authConfig.getJwksUri(), authConfig.getClientId());
+        LOG.info("[AUTH] Initializing Keycloak JWT auth — issuer={}, jwksUri={}",
+            authConfig.getIssuer(), authConfig.getJwksUri());
 
-        OAuth2Options oauth2Options = new OAuth2Options()
-            .setClientId(authConfig.getClientId())
-            .setSite(authConfig.getIssuer())
-            .setJWTOptions(new JWTOptions()
-                .setIssuer(authConfig.getIssuer())
-                // Only accept RS256 algorithm — avoids "Unsupported JWK: RSA-OAEP" error.
-                .setAlgorithm("RS256")
-            );
+        WebClient webClient = WebClient.create(vertx);
 
-        // Set audience if configured
-        if (authConfig.getAudience() != null && !authConfig.getAudience().isEmpty()) {
-            oauth2Options.getJWTOptions().setAudience(List.of(authConfig.getAudience()));
-        }
+        // Step 1: Fetch JWKS from Keycloak
+        return webClient.getAbs(authConfig.getJwksUri())
+            .putHeader("Accept", "application/json")
+            .send()
+            .compose(resp -> {
+                if (resp.statusCode() != 200) {
+                    return Future.failedFuture("JWKS fetch failed: HTTP " + resp.statusCode());
+                }
+                JsonObject body = resp.bodyAsJsonObject();
+                JsonArray keys = body.getJsonArray("keys");
+                if (keys == null || keys.isEmpty()) {
+                    return Future.failedFuture("JWKS response has no keys");
+                }
+                LOG.info("[AUTH] JWKS fetched: {} keys", keys.size());
 
-        OAuth2Auth oauth2 = OAuth2Auth.create(vertx, oauth2Options);
+                // Step 2: Build JWTAuth with the fetched keys
+                // Vert.x 5 JsonObject no longer implements Map — use encode/decode to convert
+                List<JsonObject> jwkList = keys.stream()
+                    .map(obj -> obj instanceof JsonObject jo ? jo : new JsonObject(obj.toString()))
+                    .collect(Collectors.toList());
 
-        // Load JWKS keys from Keycloak
-        return oauth2.jWKSet()
-            .map(v -> {
-                LOG.info("[AUTH] JWKS keys loaded from Keycloak");
-                return new KeycloakAuthHandler(oauth2, authConfig, skipPaths);
+                JWTAuthOptions jwtOptions = new JWTAuthOptions()
+                    .setJwks(jwkList)
+                    .setJWTOptions(new JWTOptions()
+                        .setIssuer(authConfig.getIssuer())
+                        .setAlgorithm("RS256")
+                    );
+
+                if (authConfig.getAudience() != null && !authConfig.getAudience().isEmpty()) {
+                    jwtOptions.getJWTOptions().setAudience(List.of(authConfig.getAudience()));
+                }
+
+                JWTAuth jwtAuth = JWTAuth.create(vertx, jwtOptions);
+
+                return Future.succeededFuture(new KeycloakAuthHandler(jwtAuth, authConfig, skipPaths));
+            })
+            .onSuccess(handler -> {
+                LOG.info("[AUTH] Keycloak auth handler initialized successfully");
             })
             .onFailure(err -> {
-                LOG.error("[AUTH] Failed to load JWKS keys from Keycloak: {}", err.getMessage());
-                LOG.warn("[AUTH] Token validation will fail until JWKS is available");
+                LOG.error("[AUTH] JWKS fetch failed — type: {}, message: {}", err.getClass().getName(), err.getMessage());
+                if (err.getCause() != null) {
+                    LOG.error("[AUTH]   caused by: {}: {}", err.getCause().getClass().getName(), err.getCause().getMessage());
+                }
             })
             .recover(err -> {
-                // Return handler anyway - it will reject tokens until JWKS loads
-                LOG.warn("[AUTH] Proceeding without JWKS - tokens will be rejected");
-                return Future.succeededFuture(new KeycloakAuthHandler(oauth2, authConfig, skipPaths));
+                // Proceed anyway — first request will fail auth but won't crash
+                LOG.warn("[AUTH] Proceeding without JWKS preload — tokens will be rejected until JWKS loads");
+                JWTAuthOptions emptyOptions = new JWTAuthOptions()
+                    .setJWTOptions(new JWTOptions().setIssuer(authConfig.getIssuer()));
+                JWTAuth fallbackAuth = JWTAuth.create(vertx, emptyOptions);
+                return Future.succeededFuture(new KeycloakAuthHandler(fallbackAuth, authConfig, skipPaths));
             });
     }
 
@@ -143,91 +148,58 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
         }
 
         // ========== CACHE LOOKUP ==========
-        // Check cache first to avoid repeated JWKS validation
         if (cacheManager.isEnabled()) {
             TokenCacheManager.TokenInfo cachedInfo = cacheManager.get(token);
             if (cachedInfo != null) {
-                // Use cached token info
                 ctx.put("user", cachedInfo.getPrincipal());
                 ctx.put("username", cachedInfo.getUsername());
                 ctx.put("roles", cachedInfo.getRoles());
                 ctx.put("authEnabled", true);
-                ctx.put("tokenFromCache", true); // 标记来自缓存
-
-                LOG.debug("[AUTH] Authenticated user from cache: {}, roles: {}",
-                    cachedInfo.getUsername(), cachedInfo.getRoles());
+                ctx.put("tokenFromCache", true);
+                LOG.debug("[AUTH] Token validated from cache: {}", cachedInfo.getUsername());
                 ctx.next();
                 return;
             }
         }
 
-        // ========== JWKS VALIDATION ==========
-        // Validate token via OAuth2 (cache miss or cache disabled)
+        // ========== JWT VALIDATION via JWTAuth ==========
         Credentials credentials = new TokenCredentials(token);
-
-        oauth2.authenticate(credentials)
+        authProvider.authenticate(credentials)
             .onSuccess(user -> {
-                // Extract user info from the decoded JWT
                 JsonObject tokenInfo = user.principal();
                 String username = tokenInfo.getString("preferred_username",
                     tokenInfo.getString("sub", "unknown"));
 
-                // Extract Keycloak roles from realm_access and resource_access
                 Set<String> roles = extractRoles(tokenInfo, authConfig.getClientId());
-
-                // Extract token expiration time
                 long expiresAt = extractExpiration(tokenInfo);
 
-                // ========== CACHE WRITE ==========
-                // Cache the validated token info
+                // Cache the validated token
                 if (cacheManager.isEnabled()) {
                     cacheManager.put(token, tokenInfo, roles, username, expiresAt);
-                    LOG.debug("[AUTH] Token cached for user: {}, expiresAt: {}",
-                        username, new Date(expiresAt));
                 }
 
-                // Store user info in context for downstream handlers
                 ctx.put("user", tokenInfo);
                 ctx.put("username", username);
                 ctx.put("roles", roles);
                 ctx.put("authEnabled", true);
-                ctx.put("tokenFromCache", false); // 标记来自 JWKS 验证
+                ctx.put("tokenFromCache", false);
 
-                LOG.debug("[AUTH] Authenticated user: {}, roles: {}", username, roles);
+                LOG.debug("[AUTH] JWT validated: {}, roles: {}", username, roles);
                 ctx.next();
             })
             .onFailure(err -> {
                 LOG.warn("[AUTH] Token validation failed: {}", err.getMessage());
-                if (err.getMessage() != null && err.getMessage().contains("expired")) {
-                    sendUnauthorized(ctx, "Token expired");
-                } else if (err.getMessage() != null && err.getMessage().contains("Invalid")) {
-                    sendUnauthorized(ctx, "Invalid token");
-                } else {
-                    sendUnauthorized(ctx, "Authentication failed: " + err.getMessage());
-                }
+                String msg = err.getMessage() != null ? err.getMessage() : "Invalid token";
+                sendUnauthorized(ctx, "Authentication failed: " + msg);
             });
     }
 
-    /**
-     * Extract expiration time from JWT token.
-     * Returns the 'exp' claim value (in milliseconds), or default 1 hour if not present.
-     */
     private long extractExpiration(JsonObject tokenInfo) {
         Long exp = tokenInfo.getLong("exp");
-        if (exp != null) {
-            // exp is in seconds, convert to milliseconds
-            return exp * 1000;
-        }
-        // Default: 1 hour from now
-        return System.currentTimeMillis() + 3600 * 1000;
+        if (exp != null) return exp * 1000;
+        return System.currentTimeMillis() + 3600_000;
     }
 
-    /**
-     * Extract roles from Keycloak JWT token.
-     * Keycloak puts roles in two places:
-     * - realm_access.roles (realm-level roles)
-     * - resource_access.{client-id}.roles (client-level roles)
-     */
     private Set<String> extractRoles(JsonObject tokenInfo, String clientId) {
         Set<String> roles = new HashSet<>();
 
@@ -256,7 +228,7 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
             }
         }
 
-        // Also add simple role names (without prefix) for convenience
+        // Simple role names too
         Set<String> simpleRoles = roles.stream()
             .map(r -> r.contains(":") ? r.substring(r.indexOf(":") + 1) : r)
             .collect(Collectors.toSet());
@@ -265,9 +237,6 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
         return roles;
     }
 
-    /**
-     * Send 401 Unauthorized response.
-     */
     private void sendUnauthorized(RoutingContext ctx, String reason) {
         ctx.response()
             .setStatusCode(401)
@@ -281,29 +250,24 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
     }
 
     /**
-     * Create a role-based authorization handler.
-     * Must be used AFTER KeycloakAuthHandler in the route chain.
-     *
-     * @param requiredRoles One or more roles - user must have at least one
-     * @return Handler that checks roles
+     * Role-based authorization handler — must be used AFTER KeycloakAuthHandler.
      */
-    public static Handler<RoutingContext> requireRole(String... requiredRoles) {
+    public static io.vertx.core.Handler<RoutingContext> requireRole(String... requiredRoles) {
         Set<String> required = Set.of(requiredRoles);
         return ctx -> {
             @SuppressWarnings("unchecked")
             Set<String> userRoles = ctx.get("roles");
-            if (userRoles == null) {
+            if (userRoles == null || userRoles.isEmpty()) {
                 ctx.response()
                     .setStatusCode(403)
                     .putHeader("Content-Type", "application/json")
                     .end(new JsonObject()
                         .put("code", "FORBIDDEN")
-                        .put("message", "No roles found - authentication required")
+                        .put("message", "No roles found — authentication required")
                         .put("timestamp", System.currentTimeMillis())
                         .encode());
                 return;
             }
-
             boolean hasRole = required.stream().anyMatch(userRoles::contains);
             if (hasRole) {
                 ctx.next();
@@ -313,7 +277,7 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
                     .putHeader("Content-Type", "application/json")
                     .end(new JsonObject()
                         .put("code", "FORBIDDEN")
-                        .put("message", "Insufficient permissions. Required: " + required)
+                        .put("message", "Insufficient permissions. Required: " + required + ", got: " + userRoles)
                         .put("timestamp", System.currentTimeMillis())
                         .encode());
             }

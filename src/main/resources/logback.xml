@@ -26,6 +26,11 @@
     <!-- Logger Levels -->
     <logger name="io.vertx" level="INFO" />
     <logger name="com.example" level="DEBUG" />
+    <!-- Keycloak / JWT / OAuth2 trace logging -->
+    <logger name="io.vertx.ext.auth" level="TRACE" />
+    <logger name="io.vertx.ext.auth.jwt" level="TRACE" />
+    <logger name="io.vertx.ext.auth.oauth2" level="TRACE" />
+    <logger name="com.example.auth" level="TRACE" />
 
     <!-- Root Logger -->
     <root level="INFO">
