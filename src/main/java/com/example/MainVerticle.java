@@ -3,6 +3,7 @@ package com.example;
 import com.example.api.*;
 import com.example.auth.AuthConfig;
 import com.example.auth.KeycloakAuthHandler;
+import com.example.cache.TokenCacheManager;
 import com.example.core.ApiResponse;
 import com.example.core.Config;
 import com.example.verticles.SchedulerVerticle;
@@ -22,7 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Main Verticle �?HTTP server entry point.
+ * Main Verticle HTTP server entry point.
  * <p>
  * Responsibilities:
  * - Deploy DatabaseVerticle
@@ -30,7 +31,7 @@ import java.util.UUID;
  * - Register API modules (HealthApi, UserApi, ProductApi, DocsApi)
  * - Start HTTP server
  * <p>
- * All business logic lives in com.example.api.* �?add new API modules here.
+ * All business logic lives in com.example.api.* �?add new API modules here.
  */
 public class MainVerticle extends AbstractVerticle {
 
@@ -44,6 +45,9 @@ public class MainVerticle extends AbstractVerticle {
 
     @Override
     public void start(Promise<Void> startPromise) {
+        // Initialize TokenCacheManager first
+        TokenCacheManager.initialize(config());
+        
         // Configure ApiResponse key mapping from application config (optional)
         ApiResponse.configure(config());
         deployDatabaseVerticle()
@@ -85,7 +89,7 @@ public class MainVerticle extends AbstractVerticle {
                     p.complete();
                 })
                 .onFailure(err -> {
-                    LOG.warn("[WARN] DatabaseVerticle failed �?demo mode: {}", err.getMessage());
+                    LOG.warn("[WARN] DatabaseVerticle failed �?demo mode: {}", err.getMessage());
                     p.complete();
                 });
         return p.future();
@@ -104,7 +108,7 @@ public class MainVerticle extends AbstractVerticle {
                     p.complete();
                 })
                 .onFailure(err -> {
-                    LOG.warn("[WARN] SchedulerVerticle failed �?continuing: {}", err.getMessage());
+                    LOG.warn("[WARN] SchedulerVerticle failed �?continuing: {}", err.getMessage());
                     p.complete();
                 });
         return p.future();
@@ -138,11 +142,11 @@ public class MainVerticle extends AbstractVerticle {
         AuthConfig authConfig = AuthConfig.from(config());
 
         if (!authConfig.isEnabled()) {
-            LOG.info("[AUTH] Authentication disabled �?all endpoints are open");
+            LOG.info("[AUTH] Authentication disabled �?all endpoints are open");
             return Future.succeededFuture(null);
         }
 
-        LOG.info("[AUTH] Authentication enabled �?issuer={}, clientId={}",
+        LOG.info("[AUTH] Authentication enabled �?issuer={}, clientId={}",
                 authConfig.getIssuer(), authConfig.getClientId());
 
         // Paths that skip authentication (加上 context-path 前缀)
@@ -154,7 +158,7 @@ public class MainVerticle extends AbstractVerticle {
                 contextPath + "/openapi.yaml",
                 contextPath + "/api/auth/config",
                 contextPath + "/api/info",
-                // User API 白名单（方便测试�?            contextPath + "/api/users",
+                // User API 白名单（方便测试�?            contextPath + "/api/users",
                 contextPath + "/api/users/",
                 contextPath + "/api/products",
                 contextPath + "/api/products/"
@@ -261,7 +265,7 @@ public class MainVerticle extends AbstractVerticle {
                     boolean bind = err instanceof java.net.BindException ||
                             (err.getMessage() != null && err.getMessage().toLowerCase().contains("address already in use"));
                     if (bind && attempts < 10) {
-                        LOG.warn("Port {} in use �?trying {}", port, port + 1);
+                        LOG.warn("Port {} in use �?trying {}", port, port + 1);
                         attemptListen(router, port + 1, attempts + 1, p);
                     } else {
                         p.fail(err);

@@ -36,3 +36,9 @@ scheduler:
   enabled: true
   poll-seconds: 30        # DB 轮询间隔（秒）
   http-timeout-seconds: 60  # HTTP 任务超时（秒）
+
+# Token 缓存配置（JWT token 解析结果缓存）
+cache:
+  enabled: true          # 是否启用缓存
+  max-size: 10000        # 最大缓存条目数
+  ttl-minutes: 60        # 默认 TTL（分钟），实际使用 token 自身的 exp

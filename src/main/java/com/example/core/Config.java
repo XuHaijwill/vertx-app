@@ -69,6 +69,11 @@ public class Config {
     public static final String KEY_SCHEDULER_POLL_SECS       = "scheduler.poll-seconds";
     public static final String KEY_SCHEDULER_HTTP_TIMEOUT_SECS = "scheduler.http-timeout-seconds";
 
+    // Cache config keys
+    public static final String KEY_CACHE_ENABLED      = "cache.enabled";
+    public static final String KEY_CACHE_MAX_SIZE    = "cache.max-size";
+    public static final String KEY_CACHE_TTL_MINUTES = "cache.ttl-minutes";
+
     public static final String PROFILE_DEV  = "DEV";
     public static final String PROFILE_UAT  = "UAT";
     public static final String PROFILE_PROD = "PROD";
@@ -391,5 +396,33 @@ public class Config {
             return scheduler.getInteger("http-timeout-seconds");
         }
         return config.getInteger(KEY_SCHEDULER_HTTP_TIMEOUT_SECS, 60);
+    }
+
+    // ===============================================================
+    // Cache accessors
+    // ===============================================================
+
+    public static boolean isCacheEnabled(JsonObject config) {
+        JsonObject cache = config.getJsonObject("cache");
+        if (cache != null && cache.containsKey("enabled")) {
+            return cache.getBoolean("enabled");
+        }
+        return config.getBoolean(KEY_CACHE_ENABLED, true);
+    }
+
+    public static int getCacheMaxSize(JsonObject config) {
+        JsonObject cache = config.getJsonObject("cache");
+        if (cache != null && cache.containsKey("max-size")) {
+            return cache.getInteger("max-size");
+        }
+        return config.getInteger(KEY_CACHE_MAX_SIZE, 10000);
+    }
+
+    public static long getCacheTtlMinutes(JsonObject config) {
+        JsonObject cache = config.getJsonObject("cache");
+        if (cache != null && cache.containsKey("ttl-minutes")) {
+            return cache.getLong("ttl-minutes");
+        }
+        return config.getLong(KEY_CACHE_TTL_MINUTES, 60L);
     }
 }

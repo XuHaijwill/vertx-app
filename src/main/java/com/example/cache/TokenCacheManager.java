@@ -13,6 +13,8 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.Set;
 
+import com.example.core.Config;
+
 /**
  * Token 缓存管理器 - 使用 Ehcache 3.x
  *
@@ -111,19 +113,22 @@ public class TokenCacheManager {
     /** 获取单例实例 */
     public static synchronized TokenCacheManager getInstance() {
         if (INSTANCE == null) {
-            // 默认配置：启用，最大 10000 条，默认 TTL 60 分钟
-            INSTANCE = new TokenCacheManager(true, 10000, 60);
+            throw new IllegalStateException("TokenCacheManager not initialized. Call initialize(config) first.");
         }
         return INSTANCE;
     }
 
     /** 使用配置初始化单例 */
-    public static synchronized void initialize(boolean enabled, int maxSize, long defaultTtlMinutes) {
+    public static synchronized void initialize(JsonObject config) {
         if (INSTANCE != null) {
             LOG.warn("[CACHE] TokenCacheManager already initialized, closing old instance");
             INSTANCE.shutdown();
         }
-        INSTANCE = new TokenCacheManager(enabled, maxSize, defaultTtlMinutes);
+        boolean enabled = Config.isCacheEnabled(config);
+        int maxSize = Config.getCacheMaxSize(config);
+        long ttlMinutes = Config.getCacheTtlMinutes(config);
+        
+        INSTANCE = new TokenCacheManager(enabled, maxSize, ttlMinutes);
     }
 
     /** 生成缓存 key - 使用 token 的 SHA-256 哈希前 32 字符 */
