@@ -143,6 +143,97 @@ public class UserServiceImpl implements UserService {
             });
     }
 
+    // ================================================================
+    // BATCH OPERATIONS
+    // ================================================================
+
+    private static final int MAX_BATCH_SIZE = 100;
+
+    @Override
+    public Future<JsonObject> batchCreate(List<JsonObject> users) {
+        if (users == null || users.isEmpty()) {
+            return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
+        }
+        if (users.size() > MAX_BATCH_SIZE) {
+            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
+        }
+        // Validate each user
+        for (int i = 0; i < users.size(); i++) {
+            JsonObject u = users.get(i);
+            if (u.getString("name") == null || u.getString("name").trim().isEmpty()) {
+                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: name is required"));
+            }
+            if (u.getString("email") == null || u.getString("email").trim().isEmpty()) {
+                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: email is required"));
+            }
+        }
+        if (!dbAvailable) {
+            List<JsonObject> created = users.stream().map(u -> {
+                JsonObject copy = u.copy();
+                copy.put("id", System.currentTimeMillis() + users.indexOf(u));
+                return copy;
+            }).toList();
+            return Future.succeededFuture(new JsonObject()
+                .put("created", created.size()).put("failed", 0)
+                .put("items", created));
+        }
+        return userRepository.createBatch(users)
+            .map(created -> new JsonObject()
+                .put("created", created.size()).put("failed", 0)
+                .put("items", created));
+    }
+
+    @Override
+    public Future<JsonObject> batchUpdate(List<JsonObject> users) {
+        if (users == null || users.isEmpty()) {
+            return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
+        }
+        if (users.size() > MAX_BATCH_SIZE) {
+            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
+        }
+        for (int i = 0; i < users.size(); i++) {
+            if (users.get(i).getLong("id") == null) {
+                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: id is required"));
+            }
+        }
+        if (!dbAvailable) {
+            return Future.succeededFuture(new JsonObject()
+                .put("updated", users.size()).put("failed", 0)
+                .put("items", users));
+        }
+        List<JsonObject> updated = new java.util.ArrayList<>();
+        int[] failed = {0};
+        List<JsonObject> failedItems = new java.util.ArrayList<>();
+        Future<JsonObject> result = Future.succeededFuture();
+        for (JsonObject u : users) {
+            result = result.compose(v -> userRepository.update(u.getLong("id"), u)
+                .onSuccess(row -> updated.add(row))
+                .onFailure(err -> { failed[0]++; failedItems.add(u); })
+                .mapEmpty());
+        }
+        return result.map(v -> new JsonObject()
+            .put("updated", updated.size()).put("failed", failed[0])
+            .put("items", updated)
+            .put("failedItems", failedItems));
+    }
+
+    @Override
+    public Future<JsonObject> batchDelete(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Future.failedFuture(BusinessException.badRequest("ids must be a non-empty array"));
+        }
+        if (ids.size() > MAX_BATCH_SIZE) {
+            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
+        }
+        if (!dbAvailable) {
+            return Future.succeededFuture(new JsonObject()
+                .put("deleted", ids.size()).put("failed", 0));
+        }
+        return userRepository.deleteByIds(ids)
+            .map(deleted -> new JsonObject()
+                .put("deleted", deleted).put("failed", ids.size() - deleted));
+    }
+
     @Override
     public Future<Boolean> exists(String email) {
         if (!dbAvailable) {

@@ -147,6 +147,100 @@ public class ProductServiceImpl implements ProductService {
     }
 
     // ================================================================
+    // BATCH OPERATIONS
+    // ================================================================
+
+    private static final int MAX_BATCH_SIZE = 100;
+
+    @Override
+    public Future<JsonObject> batchCreate(List<JsonObject> products) {
+        if (products == null || products.isEmpty()) {
+            return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
+        }
+        if (products.size() > MAX_BATCH_SIZE) {
+            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
+        }
+        // Validate each product
+        for (int i = 0; i < products.size(); i++) {
+            JsonObject p = products.get(i);
+            if (p.getString("name") == null || p.getString("name").trim().isEmpty()) {
+                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: name is required"));
+            }
+            if (p.getDouble("price") == null || p.getDouble("price") <= 0) {
+                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: valid price is required"));
+            }
+        }
+        if (!dbAvailable) {
+            // Demo mode: return simulated results
+            List<JsonObject> created = products.stream().map(p -> {
+                JsonObject copy = p.copy();
+                copy.put("id", System.currentTimeMillis() + products.indexOf(p));
+                return copy;
+            }).toList();
+            return Future.succeededFuture(new JsonObject()
+                .put("created", created.size()).put("failed", 0)
+                .put("items", created));
+        }
+        return productRepository.createBatch(products)
+            .map(created -> new JsonObject()
+                .put("created", created.size()).put("failed", 0)
+                .put("items", created));
+    }
+
+    @Override
+    public Future<JsonObject> batchUpdate(List<JsonObject> products) {
+        if (products == null || products.isEmpty()) {
+            return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
+        }
+        if (products.size() > MAX_BATCH_SIZE) {
+            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
+        }
+        // Validate each item has id
+        for (int i = 0; i < products.size(); i++) {
+            if (products.get(i).getLong("id") == null) {
+                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: id is required"));
+            }
+        }
+        if (!dbAvailable) {
+            return Future.succeededFuture(new JsonObject()
+                .put("updated", products.size()).put("failed", 0)
+                .put("items", products));
+        }
+        // Sequential update (each returns updated row)
+        List<JsonObject> updated = new java.util.ArrayList<>();
+        int[] failed = {0};
+        List<JsonObject> failedItems = new java.util.ArrayList<>();
+        Future<JsonObject> result = Future.succeededFuture();
+        for (JsonObject p : products) {
+            result = result.compose(v -> productRepository.update(p.getLong("id"), p)
+                .onSuccess(row -> updated.add(row))
+                .onFailure(err -> { failed[0]++; failedItems.add(p); })
+                .mapEmpty());
+        }
+        return result.map(v -> new JsonObject()
+            .put("updated", updated.size()).put("failed", failed[0])
+            .put("items", updated)
+            .put("failedItems", failedItems));
+    }
+
+    @Override
+    public Future<JsonObject> batchDelete(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Future.failedFuture(BusinessException.badRequest("ids must be a non-empty array"));
+        }
+        if (ids.size() > MAX_BATCH_SIZE) {
+            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
+        }
+        if (!dbAvailable) {
+            return Future.succeededFuture(new JsonObject()
+                .put("deleted", ids.size()).put("failed", 0));
+        }
+        return productRepository.deleteByIds(ids)
+            .map(deleted -> new JsonObject()
+                .put("deleted", deleted).put("failed", ids.size() - deleted));
+    }
+
+    // ================================================================
     // PAGINATION
     // ================================================================
 

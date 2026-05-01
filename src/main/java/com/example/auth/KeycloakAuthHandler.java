@@ -1,5 +1,6 @@
 package com.example.auth;
 
+import com.example.cache.TokenCacheManager;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -23,6 +24,12 @@ import java.util.stream.Collectors;
  * On successful validation, stores user info in the routing context
  * for downstream handlers to access.</p>
  *
+ * <h3>Cache Strategy:</h3>
+ * <p>Uses Ehcache to cache validated tokens. When a token is validated successfully,
+ * the user info (principal, roles, username) is cached until the token expires.
+ * Subsequent requests with the same token will use cached data, avoiding
+ * repeated JWKS validation calls.</p>
+ *
  * <h3>Usage in MainVerticle:</h3>
  * <pre>
  * KeycloakAuthHandler auth = KeycloakAuthHandler.create(vertx, authConfig);
@@ -35,7 +42,7 @@ import java.util.stream.Collectors;
  * <h3>Accessing user info in downstream handlers:</h3>
  * <pre>
  * JsonObject user = ctx.get("user");
- * String username = user.getString("preferred_username");
+ * String username = ctx.get("preferred_username");
  * Set&lt;String&gt; roles = ctx.get("roles");
  * </pre>
  */
@@ -46,11 +53,13 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
     private final OAuth2Auth oauth2;
     private final AuthConfig authConfig;
     private final Set<String> skipPaths;
+    private final TokenCacheManager cacheManager;
 
     private KeycloakAuthHandler(OAuth2Auth oauth2, AuthConfig authConfig, Set<String> skipPaths) {
         this.oauth2 = oauth2;
         this.authConfig = authConfig;
         this.skipPaths = skipPaths;
+        this.cacheManager = TokenCacheManager.getInstance();
     }
 
     /**
@@ -133,7 +142,27 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
             return;
         }
 
-        // Validate token via OAuth2
+        // ========== CACHE LOOKUP ==========
+        // Check cache first to avoid repeated JWKS validation
+        if (cacheManager.isEnabled()) {
+            TokenCacheManager.TokenInfo cachedInfo = cacheManager.get(token);
+            if (cachedInfo != null) {
+                // Use cached token info
+                ctx.put("user", cachedInfo.getPrincipal());
+                ctx.put("username", cachedInfo.getUsername());
+                ctx.put("roles", cachedInfo.getRoles());
+                ctx.put("authEnabled", true);
+                ctx.put("tokenFromCache", true); // 标记来自缓存
+
+                LOG.debug("[AUTH] Authenticated user from cache: {}, roles: {}",
+                    cachedInfo.getUsername(), cachedInfo.getRoles());
+                ctx.next();
+                return;
+            }
+        }
+
+        // ========== JWKS VALIDATION ==========
+        // Validate token via OAuth2 (cache miss or cache disabled)
         Credentials credentials = new TokenCredentials(token);
 
         oauth2.authenticate(credentials)
@@ -146,11 +175,23 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
                 // Extract Keycloak roles from realm_access and resource_access
                 Set<String> roles = extractRoles(tokenInfo, authConfig.getClientId());
 
+                // Extract token expiration time
+                long expiresAt = extractExpiration(tokenInfo);
+
+                // ========== CACHE WRITE ==========
+                // Cache the validated token info
+                if (cacheManager.isEnabled()) {
+                    cacheManager.put(token, tokenInfo, roles, username, expiresAt);
+                    LOG.debug("[AUTH] Token cached for user: {}, expiresAt: {}",
+                        username, new Date(expiresAt));
+                }
+
                 // Store user info in context for downstream handlers
                 ctx.put("user", tokenInfo);
                 ctx.put("username", username);
                 ctx.put("roles", roles);
                 ctx.put("authEnabled", true);
+                ctx.put("tokenFromCache", false); // 标记来自 JWKS 验证
 
                 LOG.debug("[AUTH] Authenticated user: {}, roles: {}", username, roles);
                 ctx.next();
@@ -165,6 +206,20 @@ public class KeycloakAuthHandler implements Handler<RoutingContext> {
                     sendUnauthorized(ctx, "Authentication failed: " + err.getMessage());
                 }
             });
+    }
+
+    /**
+     * Extract expiration time from JWT token.
+     * Returns the 'exp' claim value (in milliseconds), or default 1 hour if not present.
+     */
+    private long extractExpiration(JsonObject tokenInfo) {
+        Long exp = tokenInfo.getLong("exp");
+        if (exp != null) {
+            // exp is in seconds, convert to milliseconds
+            return exp * 1000;
+        }
+        // Default: 1 hour from now
+        return System.currentTimeMillis() + 3600 * 1000;
     }
 
     /**

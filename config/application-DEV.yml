@@ -23,3 +23,10 @@ auth:
   audience: vertx-app
   public-client: true
   default-roles: user
+
+# Token 缓存配置 (Ehcache)
+cache:
+  token:
+    enabled: true           # 是否启用 token 缓存
+    max-size: 10000         # 最大缓存条目数
+    default-ttl-minutes: 60 # 默认 TTL（分钟），实际使用 JWT exp 过期时间

@@ -16,6 +16,18 @@ public class ApiResponse {
     private Object data;
     private long timestamp;
     private long duration;
+    private int _httpStatus = 200;
+
+    // Customizable key mapping (defaults)
+    private static io.vertx.core.json.JsonObject keys = new io.vertx.core.json.JsonObject()
+        .put("code", "code")
+        .put("message", "message")
+        .put("data", "data")
+        .put("timestamp", "timestamp")
+        .put("duration", "duration");
+
+    // Extra top-level keys for this response (e.g. permission, count, etc.)
+    private final io.vertx.core.json.JsonObject extra = new io.vertx.core.json.JsonObject();
 
     public ApiResponse() {
         this.timestamp = System.currentTimeMillis();
@@ -64,16 +76,101 @@ public class ApiResponse {
         return new ApiResponse().setCode(SUCCESS).setMessage("Query successful").setData(pageData);
     }
 
+    /**
+     * Add a custom top-level field to this response.
+     * Allows per-response extra fields like permission, count, tags, etc.
+     *
+     * <p>Example — add permission to auth/me response:
+     * <pre>
+     * ctx.json(new ApiResponse()
+     *     .success(userData)
+     *     .putExtra("permission", roles)
+     *     .toJson());
+     * </pre>
+     * Produces: { code:"success", data:{...}, permission:[...], timestamp:... }
+     *
+     * @param key   field name
+     * @param value field value (any JSON-compatible type)
+     * @return this (fluent)
+     */
+    public ApiResponse putExtra(String key, Object value) {
+        if (key != null && !key.isEmpty()) {
+            extra.put(key, value);
+        }
+        return this;
+    }
+
+    /**
+     * Add multiple custom top-level fields at once.
+     *
+     * <p>Example:
+     * <pre>
+     * new ApiResponse().success(data).putExtras("permission", roles, "count", 42)
+     * </pre>
+     *
+     * @param kvPairs key, value, key, value... (must be even count)
+     * @return this (fluent)
+     */
+    public ApiResponse putExtras(Object... kvPairs) {
+        if (kvPairs != null) {
+            for (int i = 0; i < kvPairs.length - 1; i += 2) {
+                if (kvPairs[i] instanceof String k) {
+                    putExtra(k, kvPairs[i + 1]);
+                }
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Mark this response with a specific HTTP status code.
+     * The actual status is set by ctx.response().setStatusCode() in handlers;
+     * this field is used when a handler returns the ApiResponse's toJson()
+     * directly and still needs the correct status recorded.
+     */
+    public ApiResponse withStatus(int httpStatus) {
+        this._httpStatus = httpStatus;
+        return this;
+    }
+
+    public int getHttpStatus() { return _httpStatus; }
+
     // ========== Convert to JSON ==========
 
     public JsonObject toJson() {
-        JsonObject json = new JsonObject()
-            .put("code", code)
-            .put("message", message)
-            .put("timestamp", timestamp);
-        if (data != null) json.put("data", data);
-        if (duration > 0) json.put("duration", duration);
+        JsonObject json = new JsonObject();
+        // Use configured keys (fall back to defaults)
+        String kCode = keys.getString("code", "code");
+        String kMsg = keys.getString("message", "message");
+        String kData = keys.getString("data", "data");
+        String kTs = keys.getString("timestamp", "timestamp");
+        String kDur = keys.getString("duration", "duration");
+
+        json.put(kCode, code).put(kMsg, message).put(kTs, timestamp);
+        if (data != null) json.put(kData, data);
+        if (duration > 0) json.put(kDur, duration);
+        // Merge all extra custom fields
+        for (String k : extra.fieldNames()) {
+            json.put(k, extra.getValue(k));
+        }
         return json;
+    }
+
+    /**
+     * Configure response key mapping from application config. Expecting config
+     * structure: response: { keys: { code: "status", message: "msg", data: "payload" } }
+     */
+    public static void configure(io.vertx.core.json.JsonObject config) {
+        if (config == null) return;
+        io.vertx.core.json.JsonObject resp = config.getJsonObject("response");
+        if (resp == null) return;
+        io.vertx.core.json.JsonObject k = resp.getJsonObject("keys");
+        if (k == null) return;
+        // Merge provided keys into defaults
+        for (String field : k.fieldNames()) {
+            String val = k.getString(field);
+            if (val != null && !val.isEmpty()) keys.put(field, val);
+        }
     }
 
     // ========== Getters & Setters ==========

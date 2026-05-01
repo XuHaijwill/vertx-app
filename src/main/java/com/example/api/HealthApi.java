@@ -37,7 +37,11 @@ public class HealthApi extends BaseApi {
             .put("memory", getMemoryInfo())
             .put("database", DatabaseVerticle.getPool(vertx) != null ? "connected" : "demo-mode")
             .put("auth", getAuthInfo(ctx));
-        ok(ctx, health);
+//        ok(ctx, health);
+        ctx.json(ApiResponse.success(health)
+                .putExtra("requestId", ctx.request().getHeader("X-Request-ID"))
+                .putExtra("serverTime", System.currentTimeMillis())
+                .toJson());
     }
 
     private JsonObject getAuthInfo(RoutingContext ctx) {

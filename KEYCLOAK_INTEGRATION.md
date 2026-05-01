@@ -147,3 +147,11 @@ router.delete("/api/users/:id").handler(KeycloakAuthHandler.requireRole("admin")
 2. 添加 client secret 支持 (confidential client)
 3. 实现令牌刷新端点
 4. 添加 CORS 配置 (如果前端在不同域)
+
+docker run -d \
+--name keycloak \
+-p 8080:8080 \
+-e KEYCLOAK_ADMIN=admin \
+-e KEYCLOAK_ADMIN_PASSWORD=admin \
+quay.io/keycloak/keycloak:22.0 \
+start-dev
