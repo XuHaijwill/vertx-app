@@ -122,6 +122,34 @@ public class DatabaseVerticle extends AbstractVerticle {
     }
 
     // ================================================================
+    // Connection helpers (for audit logging and other non-transactional use)
+    // ================================================================
+
+    /**
+     * Acquire a connection from the pool, use it, then automatically close it.
+     *
+     * <p>This is the recommended way to run single-statement operations
+     * without the overhead of managing connection lifecycle manually.
+     *
+     * <p>Usage:
+     * <pre>
+     * return DatabaseVerticle.withConnection(vertx)
+     *     .compose(conn -> conn.query(sql).execute(params)
+     *         .eventually(v -> conn.close())
+     *         .map(rows -> toJsonList(rows));
+     * </pre>
+     *
+     * @param vertx  Vert.x instance
+     * @param <T>    result type
+     * @return Future that completes with the result, or fails if pool unavailable
+     */
+    public static <T> Future<SqlConnection> withConnection(Vertx vertx) {
+        Pool pool = getPool(vertx);
+        if (pool == null) return Future.failedFuture("Database not available (demo mode)");
+        return pool.getConnection();
+    }
+
+    // ================================================================
     // Pool-based queries (standalone, no transaction)
     // ================================================================
 

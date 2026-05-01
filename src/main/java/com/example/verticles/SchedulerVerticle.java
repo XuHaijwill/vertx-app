@@ -9,8 +9,6 @@ import com.cronutils.model.time.ExecutionTime;
 import com.cronutils.parser.CronParser;
 import io.vertx.core.*;
 import io.vertx.core.json.JsonObject;
-import io.vertx.core.parsetools.JsonParser;
-import io.vertx.core.streams.ReadStream;
 import io.vertx.ext.web.client.HttpResponse;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientOptions;
@@ -19,6 +17,7 @@ import io.vertx.sqlclient.Tuple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Method;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -34,22 +33,61 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <ul>
  *   <li>Polls DB every N seconds (configurable via scheduler.poll-seconds)</li>
  *   <li>Executes tasks whose next_run_time &lt;= now AND status = 'ACTIVE'</li>
- *   <li>Supports task types: HTTP, SQL</li>
+ *   <li>Supports task types: HTTP, SQL, CLASS (Java method invocation)</li>
  *   <li>Updates last_run_time, last_run_status, last_run_message, run_count,
  *       next_run_time (computed from cron expression) after each execution</li>
  *   <li>Uses a ConcurrentHashMap to track currently-running tasks (prevent concurrent runs
  *       of the same task)</li>
  * </ul>
  *
- * <p>To add a new scheduled task, insert a row into the scheduled_tasks table:</p>
+ * <h2>Task Types:</h2>
+ *
+ * <h3>1. HTTP Task</h3>
  * <pre>
  * INSERT INTO scheduled_tasks (name, task_type, config, cron, next_run_time, status)
- * VALUES ('my-task', 'HTTP',
- *   '{"url": "http://localhost:8888/support/api/...", "method": "GET"}',
- *   '0 0 * * * ?',   -- cron: at the top of every hour
+ * VALUES ('ping-api', 'HTTP',
+ *   '{"url": "http://localhost:8888/api/health", "method": "GET", "headers": {"Authorization": "Bearer xxx"}}',
+ *   '0 0 * * * ?',
  *   CURRENT_TIMESTAMP,
  *   'ACTIVE');
  * </pre>
+ *
+ * <h3>2. SQL Task</h3>
+ * <pre>
+ * INSERT INTO scheduled_tasks (name, task_type, config, cron, next_run_time, status)
+ * VALUES ('cleanup-old-logs', 'SQL',
+ *   '{"sql": "DELETE FROM logs WHERE created_at < NOW() - INTERVAL ''30 days''"}',
+ *   '0 0 3 * * ?',  -- 每天 3:00 执行
+ *   CURRENT_TIMESTAMP,
+ *   'ACTIVE');
+ * </pre>
+ *
+ * <h3>3. CLASS Task (Java Method Invocation)</h3>
+ * <pre>
+ * -- 同步方法示例
+ * INSERT INTO scheduled_tasks (name, task_type, config, cron, next_run_time, status)
+ * VALUES ('daily-report', 'CLASS',
+ *   '{"class": "com.example.tasks.ReportTasks", "method": "generateDailyReport", "params": {"type": "sales"}}',
+ *   '0 0 8 * * ?',  -- 每天 8:00 执行
+ *   CURRENT_TIMESTAMP,
+ *   'ACTIVE');
+ *
+ * -- 异步 Vert.x Future 方法示例
+ * INSERT INTO scheduled_tasks (name, task_type, config, cron, next_run_time, status)
+ * VALUES ('sync-inventory', 'CLASS',
+ *   '{"class": "com.example.tasks.InventoryTasks", "method": "syncFromExternal", "async": true}',
+ *   '0 30 * * * ?',  -- 每小时 30 分执行
+ *   CURRENT_TIMESTAMP,
+ *   'ACTIVE');
+ * </pre>
+ *
+ * <h2>CLASS Task Requirements:</h2>
+ * <ul>
+ *   <li>Method must be public static</li>
+ *   <li>Sync methods: accept JsonObject param, return String</li>
+ *   <li>Async methods: accept (Vertx, JsonObject) params, return Future&lt;String&gt;</li>
+ *   <li>Set "async": true in config for Future-returning methods</li>
+ * </ul>
  */
 public class SchedulerVerticle extends AbstractVerticle {
 
@@ -193,9 +231,10 @@ public class SchedulerVerticle extends AbstractVerticle {
 
     private Future<String> executeByType(String taskType, JsonObject cfg) {
         return switch (taskType.toUpperCase()) {
-            case "HTTP" -> executeHttpTask(cfg);
-            case "SQL"  -> executeSqlTask(cfg);
-            default     -> Future.failedFuture("Unknown task type: " + taskType);
+            case "HTTP"  -> executeHttpTask(cfg);
+            case "SQL"   -> executeSqlTask(cfg);
+            case "CLASS" -> executeClassTask(cfg);
+            default      -> Future.failedFuture("Unknown task type: " + taskType);
         };
     }
 
@@ -287,6 +326,82 @@ public class SchedulerVerticle extends AbstractVerticle {
             return DatabaseVerticle.query(vertx, sql)
                 .map(rows -> String.format("OK — %d row(s) affected", rows.rowCount()));
         }
+    }
+
+    // ---------------------------------------------------------------
+    // CLASS task (Java method invocation)
+    // ---------------------------------------------------------------
+
+    /**
+     * Execute a Java class method via reflection.
+     *
+     * <p>Config fields:</p>
+     * <ul>
+     *   <li>class:  fully-qualified class name (e.g., "com.example.tasks.ReportTasks")</li>
+     *   <li>method: public static method name</li>
+     *   <li>params: optional JsonObject passed to the method (default: empty)</li>
+     *   <li>async:  if true, method returns Future&lt;String&gt;; otherwise returns String</li>
+     * </ul>
+     *
+     * <p>Sync method signature: public static String methodName(JsonObject params)</p>
+     * <p>Async method signature: public static Future&lt;String&gt; methodName(Vertx vertx, JsonObject params)</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Future<String> executeClassTask(JsonObject cfg) {
+        String className  = cfg.getString("class");
+        String methodName = cfg.getString("method");
+        JsonObject params = cfg.getJsonObject("params", new JsonObject());
+        boolean isAsync   = cfg.getBoolean("async", false);
+
+        if (className == null || className.isBlank()) {
+            return Future.failedFuture("CLASS task: 'class' is required");
+        }
+        if (methodName == null || methodName.isBlank()) {
+            return Future.failedFuture("CLASS task: 'method' is required");
+        }
+
+        Promise<String> promise = Promise.promise();
+
+        try {
+            // Load class
+            Class<?> clazz = Class.forName(className);
+
+            if (isAsync) {
+                // Async method: public static Future<String> method(Vertx, JsonObject)
+                Method method = clazz.getMethod(methodName, Vertx.class, JsonObject.class);
+                Object result = method.invoke(null, vertx, params);
+                if (result instanceof Future) {
+                    ((Future<String>) result).onComplete(ar -> {
+                        if (ar.succeeded()) {
+                            promise.complete(ar.result());
+                        } else {
+                            promise.fail(ar.cause());
+                        }
+                    });
+                } else {
+                    promise.fail("Async method must return Future<String>");
+                }
+            } else {
+                // Sync method: public static String method(JsonObject)
+                Method method = clazz.getMethod(methodName, JsonObject.class);
+                Object result = method.invoke(null, params);
+                if (result instanceof String) {
+                    promise.complete((String) result);
+                } else {
+                    promise.fail("Sync method must return String");
+                }
+            }
+        } catch (ClassNotFoundException e) {
+            promise.fail("Class not found: " + className);
+        } catch (NoSuchMethodException e) {
+            promise.fail("Method not found: " + className + "." + methodName);
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            promise.fail("Invocation error: " + cause.getMessage());
+            LOG.error("[SCHEDULER] CLASS task invocation error", e);
+        }
+
+        return promise.future();
     }
 
     // ================================================================
