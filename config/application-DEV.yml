@@ -20,7 +20,7 @@ auth:
   realm: myrealm
   auth-server-url: http://192.168.60.134:8080
   client-id: vertx-app
-  audience: vertx-app
+  audience: myrealm
   public-client: true
   default-roles: user
 

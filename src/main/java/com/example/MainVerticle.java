@@ -158,10 +158,13 @@ public class MainVerticle extends AbstractVerticle {
                 contextPath + "/openapi.yaml",
                 contextPath + "/api/auth/config",
                 contextPath + "/api/info",
-                // User API 白名单（方便测试�?            contextPath + "/api/users",
+                // User API 白名单（方便测试            contextPath + "/api/users",
                 contextPath + "/api/users/",
                 contextPath + "/api/products",
-                contextPath + "/api/products/"
+                contextPath + "/api/products/",
+                contextPath + "/api/sys-configs",
+                contextPath + "/api/sys-configs/"
+
         ));
 
         return KeycloakAuthHandler.create(vertx, authConfig, skipPaths)

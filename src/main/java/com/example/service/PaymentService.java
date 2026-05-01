@@ -1,13 +1,7 @@
 package com.example.service;
 
 import com.example.core.BusinessException;
-import com.example.db.AuditAction;
-import com.example.db.AuditLogger;
-import com.example.db.DatabaseVerticle;
-import com.example.db.Transactional;
-import com.example.db.TransactionContext;
-import com.example.db.TransactionTemplate;
-import com.example.db.TxContextHolder;
+import com.example.db.*;
 import com.example.repository.InventoryTransactionRepository;
 import com.example.repository.OrderRepository;
 import com.example.repository.PaymentRepository;
@@ -131,20 +125,18 @@ public class PaymentService {
                 return paymentRepo.insertPayment(orderId, userId, amount, method, "pending")
                     .map(order);
             })
-            // Step 4: Update payment to completed
-            .compose(order ->
-                paymentRepo.findByOrderIdForTx(orderId)
-                    .compose(payment -> paymentRepo.updatePaymentStatus(payment.getLong("id"), "completed"))
-                    .map(order))
+            // Step 4: Update payment to completed, capture for audit
+            .compose(order -> {
+                return paymentRepo.findByOrderIdForTx(orderId)
+                    .compose(payment -> paymentRepo.updatePaymentStatus(payment.getLong("id"), "completed").map(payment))
+                    .map(order);
+            })
             // Step 5: Update order status
             .compose(order -> orderRepo.updateStatus(orderId, "completed").map(order))
-            // Step 6: Audit log for payment creation (模式A: 事务内)
-            .compose(order -> paymentRepo.findByOrderIdForTx(orderId)
-                .compose((JsonObject payment) -> audit.logInTx(TxContextHolder.current(),
-                        AuditAction.AUDIT_CREATE, "payments",
-                        String.valueOf(payment.getLong("id")),
-                        null, payment)
-                    .map(payment)))
+            // Step 6: Audit log (模式B: 独立连接，auto-commit，不参与主事务)
+            .compose(order -> audit.log(AuditAction.AUDIT_CREATE, "payments",
+                    String.valueOf(orderId), null, null)
+                .map(order))
             // Step 7: Confirm stock + record inventory ledger
             .compose((JsonObject order) -> confirmStockAndLedger(orderId).map(order))
             // Step 8: Increment user order_count
@@ -210,24 +202,25 @@ public class PaymentService {
                 return Future.succeededFuture(payment);
             })
             // Step 3: Update payment status → refunded
-            .compose((JsonObject payment) -> paymentRepo.updatePaymentStatus(paymentId, "refunded").map(payment))
-            // Step 4: Update order status → refunded
-            .compose((JsonObject payment) -> {
-                Long orderId = payment.getLong("order_id");
-                return orderRepo.updateStatus(orderId, "refunded").map(payment);
-            })
-            // Step 5: Audit log (模式A: 事务内)
             .compose((JsonObject payment) -> {
                 JsonObject oldVal = payment.copy();
-                JsonObject newVal = payment.copy().put("status", "refunded");
-                return audit.logInTx(TxContextHolder.current(),
-                        AuditAction.AUDIT_UPDATE, "payments",
-                        String.valueOf(paymentId),
-                        oldVal, newVal)
-                    .map(payment);
+                return paymentRepo.updatePaymentStatus(paymentId, "refunded")
+                    .map(oldVal);
+            })
+            // Step 4: Update order status → refunded
+            .compose((JsonObject oldVal) -> {
+                Long orderId = oldVal.getLong("order_id");
+                return orderRepo.updateStatus(orderId, "refunded").map(oldVal);
+            })
+            // Step 5: Audit log (模式B: 独立连接)
+            .compose((JsonObject oldVal) -> {
+                JsonObject newVal = oldVal.copy().put("status", "refunded");
+                return audit.log(AuditAction.AUDIT_UPDATE, "payments",
+                    String.valueOf(paymentId), oldVal, newVal)
+                    .map(oldVal);
             })
             // Step 6: Return enriched payment
-            .compose((JsonObject payment) -> findPaymentEnriched(paymentId).map(p -> p != null ? p : payment))
+            .compose((JsonObject oldVal) -> findPaymentEnriched(paymentId).map(p -> p != null ? p : oldVal))
             .onSuccess(result -> LOG.info("[PAY] Refunded: paymentId={}", paymentId))
             .onFailure(err -> LOG.error("[PAY] Refund failed: paymentId={}, err={}", paymentId, err.getMessage()));
     }

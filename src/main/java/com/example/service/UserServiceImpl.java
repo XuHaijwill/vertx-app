@@ -4,7 +4,6 @@ import com.example.core.BusinessException;
 import com.example.core.PageResult;
 import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
-import com.example.db.TxContextHolder;
 import com.example.repository.UserRepository;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -100,14 +99,11 @@ public class UserServiceImpl implements UserService {
                         BusinessException.conflict("Email already exists"));
                 }
                 return userRepository.create(user)
-                    .compose(created -> {
-                        // Audit log (模式A: 事务内)
-                        return audit.logInTx(TxContextHolder.current(),
-                                AuditAction.AUDIT_CREATE, "users",
-                                String.valueOf(created.getLong("id")),
-                                null, created)
-                            .map(created);
-                    });
+                    .compose(created -> audit.log(
+                            AuditAction.AUDIT_CREATE, "users",
+                            String.valueOf(created.getLong("id")),
+                            null, created)
+                        .map(created));
             });
     }
 
@@ -130,25 +126,19 @@ public class UserServiceImpl implements UserService {
                                     BusinessException.conflict("Email already exists"));
                             }
                             return userRepository.update(id, user)
-                                .compose(updated -> {
-                                    // Audit log (模式A: 事务内)
-                                    return audit.logInTx(TxContextHolder.current(),
-                                            AuditAction.AUDIT_UPDATE, "users",
-                                            String.valueOf(id),
-                                            existing, updated)
-                                        .map(updated);
-                                });
+                                .compose(updated -> audit.log(
+                                        AuditAction.AUDIT_UPDATE, "users",
+                                        String.valueOf(id),
+                                        existing, updated)
+                                    .map(updated));
                         });
                 }
                 return userRepository.update(id, user)
-                    .compose(updated -> {
-                        // Audit log (模式A: 事务内)
-                        return audit.logInTx(TxContextHolder.current(),
-                                AuditAction.AUDIT_UPDATE, "users",
-                                String.valueOf(id),
-                                existing, updated)
-                            .map(updated);
-                    });
+                    .compose(updated -> audit.log(
+                            AuditAction.AUDIT_UPDATE, "users",
+                            String.valueOf(id),
+                            existing, updated)
+                        .map(updated));
             })
             .map(updated -> {
                 if (updated == null) {
@@ -169,14 +159,11 @@ public class UserServiceImpl implements UserService {
                     return Future.<Void>failedFuture(BusinessException.notFound("User"));
                 }
                 return userRepository.delete(id)
-                    .compose(v -> {
-                        // Audit log (模式A: 事务内)
-                        return audit.logInTx(TxContextHolder.current(),
-                                AuditAction.AUDIT_DELETE, "users",
-                                String.valueOf(id),
-                                existing, null)
-                            .mapEmpty();
-                    });
+                    .compose(v -> audit.log(
+                            AuditAction.AUDIT_DELETE, "users",
+                            String.valueOf(id),
+                            existing, null)
+                        .mapEmpty());
             });
     }
 

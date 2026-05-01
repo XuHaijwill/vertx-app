@@ -4,7 +4,6 @@ import com.example.core.BusinessException;
 import com.example.core.PageResult;
 import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
-import com.example.db.TxContextHolder;
 import com.example.repository.ProductRepository;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -114,14 +113,11 @@ public class ProductServiceImpl implements ProductService {
                         BusinessException.conflict("Product name already exists"));
                 }
                 return productRepository.create(product)
-                    .compose(created -> {
-                        // Audit log (模式A: 事务内)
-                        return audit.logInTx(TxContextHolder.current(),
-                                AuditAction.AUDIT_CREATE, "products",
-                                String.valueOf(created.getLong("id")),
-                                null, created)
-                            .map(created);
-                    });
+                    .compose(created -> audit.log(
+                            AuditAction.AUDIT_CREATE, "products",
+                            String.valueOf(created.getLong("id")),
+                            null, created)
+                        .map(created));
             });
     }
 
@@ -136,14 +132,11 @@ public class ProductServiceImpl implements ProductService {
                     return Future.<JsonObject>failedFuture(BusinessException.notFound("Product"));
                 }
                 return productRepository.update(id, product)
-                    .compose(updated -> {
-                        // Audit log (模式A: 事务内)
-                        return audit.logInTx(TxContextHolder.current(),
-                                AuditAction.AUDIT_UPDATE, "products",
-                                String.valueOf(id),
-                                existing, updated)
-                            .map(updated);
-                    });
+                    .compose(updated -> audit.log(
+                            AuditAction.AUDIT_UPDATE, "products",
+                            String.valueOf(id),
+                            existing, updated)
+                        .map(updated));
             })
             .map(updated -> {
                 if (updated == null) {
@@ -164,14 +157,11 @@ public class ProductServiceImpl implements ProductService {
                     return Future.<Void>failedFuture(BusinessException.notFound("Product"));
                 }
                 return productRepository.delete(id)
-                    .compose(v -> {
-                        // Audit log (模式A: 事务内)
-                        return audit.logInTx(TxContextHolder.current(),
-                                AuditAction.AUDIT_DELETE, "products",
-                                String.valueOf(id),
-                                existing, null)
-                            .mapEmpty();
-                    });
+                    .compose(v -> audit.log(
+                            AuditAction.AUDIT_DELETE, "products",
+                            String.valueOf(id),
+                            existing, null)
+                        .mapEmpty());
             });
     }
 

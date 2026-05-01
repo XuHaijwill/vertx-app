@@ -211,7 +211,7 @@ public class AuditLogger {
         }
 
         Tuple params = Tuple.tuple()
-            .addString(ctx.getTraceId())
+            .addString(ensureTraceId(ctx.getTraceId()))
             .addString(action.value())
             .addString(entityType)
             .addString(String.valueOf(entityId))
@@ -308,5 +308,13 @@ public class AuditLogger {
             return Math.abs(da - db) <= Math.max(Math.abs(da), Math.abs(db)) * 0.01;
         }
         return false;
+    }
+
+    /**
+     * Ensure trace_id is never null — generate one if missing.
+     */
+    private static String ensureTraceId(String traceId) {
+        if (traceId != null && !traceId.isBlank()) return traceId;
+        return java.util.UUID.randomUUID().toString();
     }
 }
