@@ -2,6 +2,7 @@ package com.example.api;
 
 import com.example.core.BusinessException;
 import com.example.service.OrderService;
+import com.example.service.impl.OrderServiceImpl;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
@@ -23,7 +24,7 @@ public class OrderApi extends BaseApi {
 
     public OrderApi(Vertx vertx) {
         super(vertx);
-        this.orderService = new OrderService(vertx);
+        this.orderService = new OrderServiceImpl(vertx);
     }
 
     @Override

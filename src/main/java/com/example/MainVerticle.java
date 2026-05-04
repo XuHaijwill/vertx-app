@@ -163,7 +163,8 @@ public class MainVerticle extends AbstractVerticle {
                 contextPath + "/api/products",
                 contextPath + "/api/products/",
                 contextPath + "/api/sys-configs",
-                contextPath + "/api/sys-configs/"
+                contextPath + "/api/sys-configs/",
+                contextPath + "/api/menus"
 
         ));
 
@@ -190,13 +191,16 @@ public class MainVerticle extends AbstractVerticle {
         new UserApi(vertx).registerRoutes(router, contextPath);
         new ProductApi(vertx).registerRoutes(router, contextPath);
         new SysConfigApi(vertx).registerRoutes(router, contextPath);
+        new SysDictTypeApi(vertx).registerRoutes(router, contextPath);
+        new SysDictDataApi(vertx).registerRoutes(router, contextPath);
+        new SysMenuApi(vertx).registerRoutes(router, contextPath);
         new DocsApi(vertx).registerRoutes(router, contextPath);
         new OrderApi(vertx).registerRoutes(router, contextPath);
         new PaymentApi(vertx).registerRoutes(router, contextPath);
         new BatchApi(vertx).registerRoutes(router, contextPath);
         new AuthApi(vertx, authConfig).registerRoutes(router, contextPath);
 
-        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, Order, Payment, Batch, Docs, Auth");
+        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, SysDictType, SysDictData, SysMenu, Order, Payment, Batch, Docs, Auth");
     }
 
     // ================================================================

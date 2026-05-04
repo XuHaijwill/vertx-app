@@ -2,6 +2,7 @@ package com.example.api;
 
 import com.example.core.BusinessException;
 import com.example.service.PaymentService;
+import com.example.service.impl.PaymentServiceImpl;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
@@ -24,7 +25,7 @@ public class PaymentApi extends BaseApi {
 
     public PaymentApi(Vertx vertx) {
         super(vertx);
-        this.paymentService = new PaymentService(vertx);
+        this.paymentService = new PaymentServiceImpl(vertx);
     }
 
     @Override

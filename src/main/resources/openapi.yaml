@@ -34,6 +34,12 @@ tags:
     description: Payment processing with 5-table ACID transactions
   - name: SysConfig
     description: System configuration management operations
+  - name: SysDictType
+    description: Dictionary type management operations
+  - name: SysDictData
+    description: Dictionary data management operations
+  - name: SysMenu
+    description: Menu permission management operations
   - name: Auth
     description: Authentication and authorization endpoints
 
@@ -1259,6 +1265,710 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
   # ================================================================
+  # SYS_DICT_TYPE ENDPOINTS
+  # ================================================================
+  /api/dict-types:
+    get:
+      tags:
+        - SysDictType
+      summary: List dictionary types
+      description: Returns a list of all dictionary types with pagination support
+      operationId: listDictTypes
+      parameters:
+        - name: dictType
+          in: query
+          description: Filter by dict_type (fuzzy search)
+          required: false
+          schema:
+            type: string
+        - name: dictName
+          in: query
+          description: Filter by dict_name (fuzzy search)
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by status (Normal/Disabled)
+          required: false
+          schema:
+            type: string
+            enum: ["0", "1"]
+        - name: page
+          in: query
+          description: Page number (1-based)
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: size
+          in: query
+          description: Page size
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: List of dictionary types
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictTypesResponse'
+    post:
+      tags:
+        - SysDictType
+      summary: Create a new dictionary type
+      description: Creates a new dictionary type with the provided information
+      operationId: createDictType
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDictTypeRequest'
+            example:
+              dict_name: System Status
+              dict_type: sys_status
+              status: "0"
+              remark: System status dictionary
+      responses:
+        '201':
+          description: Dictionary type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictTypeResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Dict type already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/dict-types/{id}:
+    get:
+      tags:
+        - SysDictType
+      summary: Get dictionary type by ID
+      operationId: getDictTypeById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Dictionary type ID
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Dictionary type found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictTypeResponse'
+        '404':
+          description: Dictionary type not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+        - SysDictType
+      summary: Update dictionary type
+      operationId: updateDictType
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDictTypeRequest'
+      responses:
+        '200':
+          description: Dictionary type updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictTypeResponse'
+        '404':
+          description: Dictionary type not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - SysDictType
+      summary: Delete dictionary type
+      description: Deletes a dictionary type. Will fail if dict_data exists for this type.
+      operationId: deleteDictType
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Dictionary type deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Dictionary type not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot delete - dictionary data exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/dict-types/type/{dictType}:
+    get:
+      tags:
+        - SysDictType
+      summary: Get dictionary type by dict_type
+      operationId: getDictTypeByType
+      parameters:
+        - name: dictType
+          in: path
+          required: true
+          description: Dictionary type code
+          schema:
+            type: string
+          example: sys_normal_disable
+      responses:
+        '200':
+          description: Dictionary type found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictTypeResponse'
+        '404':
+          description: Dictionary type not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ================================================================
+  # SYS_DICT_DATA ENDPOINTS
+  # ================================================================
+  /api/dict-data:
+    get:
+      tags:
+        - SysDictData
+      summary: List dictionary data
+      description: Returns a list of dictionary data with pagination support
+      operationId: listDictData
+      parameters:
+        - name: dictType
+          in: query
+          description: Filter by dict_type (exact match)
+          required: false
+          schema:
+            type: string
+        - name: dictLabel
+          in: query
+          description: Filter by dict_label (fuzzy search)
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by status
+          required: false
+          schema:
+            type: string
+            enum: ["0", "1"]
+        - name: page
+          in: query
+          description: Page number (1-based)
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          description: Page size
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: List of dictionary data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictDataListResponse'
+    post:
+      tags:
+        - SysDictData
+      summary: Create dictionary data
+      operationId: createDictData
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDictDataRequest'
+            example:
+              dict_type: sys_normal_disable
+              dict_label: Normal
+              dict_value: "0"
+              dict_sort: 1
+              status: "0"
+              remark: Normal status
+      responses:
+        '201':
+          description: Dictionary data created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictDataResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Dict type/value combination already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/dict-data/{id}:
+    get:
+      tags:
+        - SysDictData
+      summary: Get dictionary data by ID
+      operationId: getDictDataById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Dictionary data found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictDataResponse'
+        '404':
+          description: Dictionary data not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+        - SysDictData
+      summary: Update dictionary data
+      operationId: updateDictData
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDictDataRequest'
+      responses:
+        '200':
+          description: Dictionary data updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictDataResponse'
+        '404':
+          description: Dictionary data not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - SysDictData
+      summary: Delete dictionary data
+      operationId: deleteDictData
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Dictionary data deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Dictionary data not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/dict-data/type/{dictType}:
+    get:
+      tags:
+        - SysDictData
+      summary: Get all dictionary data by dict_type
+      description: Returns all dictionary data entries for a specific dict_type (no pagination)
+      operationId: getDictDataByType
+      parameters:
+        - name: dictType
+          in: path
+          required: true
+          description: Dictionary type code
+          schema:
+            type: string
+          example: sys_normal_disable
+      responses:
+        '200':
+          description: List of dictionary data for the type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysDictDataListResponse'
+              example:
+                code: success
+                data:
+                  - dict_code: 1
+                    dict_sort: 1
+                    dict_label: Normal
+                    dict_value: "0"
+                    dict_type: sys_normal_disable
+                    status: "0"
+                  - dict_code: 2
+                    dict_sort: 2
+                    dict_label: Disabled
+                    dict_value: "1"
+                    dict_type: sys_normal_disable
+                    status: "0"
+    delete:
+      tags:
+        - SysDictData
+      summary: Delete all dictionary data by dict_type
+      operationId: deleteDictDataByType
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: dictType
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: All dictionary data for the type deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ================================================================
+  # SYS_MENU ENDPOINTS
+  # ================================================================
+  /api/menus:
+    get:
+      tags:
+        - SysMenu
+      summary: List all menus
+      description: Returns a flat list of all menus
+      operationId: listMenus
+      parameters:
+        - name: menuName
+          in: query
+          description: Filter by menu_name (fuzzy search)
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by status
+          required: false
+          schema:
+            type: string
+            enum: ["0", "1"]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: List of menus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysMenusResponse'
+    post:
+      tags:
+        - SysMenu
+      summary: Create a new menu
+      operationId: createMenu
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMenuRequest'
+            example:
+              menu_name: User Management
+              menu_type: C
+              parent_id: 1
+              order_num: 1
+              path: /system/user
+              component: system/user/index
+              perms: system:user:list
+              status: "0"
+              visible: "0"
+      responses:
+        '201':
+          description: Menu created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysMenuResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Menu name already exists under same parent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/menus/tree:
+    get:
+      tags:
+        - SysMenu
+      summary: Get menu tree
+      description: Returns menus in hierarchical tree structure
+      operationId: getMenuTree
+      responses:
+        '200':
+          description: Menu tree
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysMenuTreeResponse'
+              example:
+                code: success
+                data:
+                  - menu_id: 1
+                    menu_name: System Management
+                    menu_type: M
+                    parent_id: 0
+                    children:
+                      - menu_id: 100
+                        menu_name: User Management
+                        menu_type: C
+                        parent_id: 1
+                        children: []
+
+  /api/menus/{id}:
+    get:
+      tags:
+        - SysMenu
+      summary: Get menu by ID
+      operationId: getMenuById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Menu found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysMenuResponse'
+        '404':
+          description: Menu not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+        - SysMenu
+      summary: Update menu
+      operationId: updateMenu
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMenuRequest'
+      responses:
+        '200':
+          description: Menu updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysMenuResponse'
+        '404':
+          description: Menu not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot create circular reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - SysMenu
+      summary: Delete menu
+      description: Deletes a menu. Will fail if menu has children.
+      operationId: deleteMenu
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Menu deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Menu not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot delete menu with children
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/menus/parent/{parentId}:
+    get:
+      tags:
+        - SysMenu
+      summary: Get menus by parent ID
+      operationId: getMenusByParent
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          description: Parent menu ID (0 for root)
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: List of child menus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysMenusResponse'
+
+  /api/menus/visible:
+    get:
+      tags:
+        - SysMenu
+      summary: Get visible menus
+      description: Returns only menus that are visible (visible=0) and active (status=0)
+      operationId: getVisibleMenus
+      responses:
+        '200':
+          description: List of visible menus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SysMenusResponse'
+
+  # ================================================================
   # INFO ENDPOINT
   # ================================================================
   /api/info:
@@ -2047,3 +2757,580 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/PageResultSysConfig'
+
+    # ================================================================
+    # SYS_DICT_TYPE SCHEMAS
+    # ================================================================
+    SysDictType:
+      type: object
+      properties:
+        dict_id:
+          type: integer
+          format: int64
+          description: Dictionary type ID
+          example: 1
+        dict_name:
+          type: string
+          description: Dictionary type name
+          example: System Status
+        dict_type:
+          type: string
+          description: Dictionary type code (unique)
+          example: sys_status
+        status:
+          type: string
+          description: Status (0=Normal, 1=Disabled)
+          enum: ["0", "1"]
+          example: "0"
+        create_by:
+          type: string
+          description: Creator username
+          example: admin
+        create_time:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        update_by:
+          type: string
+          description: Last updater username
+        update_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last update timestamp
+        remark:
+          type: string
+          nullable: true
+          description: Dictionary type description/notes
+          example: System status dictionary
+
+    CreateDictTypeRequest:
+      type: object
+      required:
+        - dict_name
+        - dict_type
+      properties:
+        dict_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Dictionary type name
+          example: System Status
+        dict_type:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '^[a-zA-Z][a-zA-Z0-9_]*$'
+          description: Dictionary type code (unique, must start with letter)
+          example: sys_status
+        status:
+          type: string
+          enum: ["0", "1"]
+          default: "0"
+          description: Status (0=Normal, 1=Disabled)
+        remark:
+          type: string
+          maxLength: 500
+          description: Dictionary type description
+
+    UpdateDictTypeRequest:
+      type: object
+      properties:
+        dict_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Dictionary type name
+        status:
+          type: string
+          enum: ["0", "1"]
+          description: Status
+        remark:
+          type: string
+          maxLength: 500
+          description: Dictionary type description
+
+    SysDictTypeResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/SysDictType'
+
+    SysDictTypesResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/PageResultDictType'
+
+    PageResultDictType:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SysDictType'
+        total:
+          type: integer
+          format: int64
+          description: Total number of matching records
+          example: 10
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        size:
+          type: integer
+          description: Page size
+          example: 20
+
+    # ================================================================
+    # SYS_DICT_DATA SCHEMAS
+    # ================================================================
+    SysDictData:
+      type: object
+      properties:
+        dict_code:
+          type: integer
+          format: int64
+          description: Dictionary data ID
+          example: 1
+        dict_sort:
+          type: integer
+          description: Sort order
+          example: 1
+        dict_label:
+          type: string
+          description: Dictionary label (display text)
+          example: Normal
+        dict_value:
+          type: string
+          description: Dictionary value
+          example: "0"
+        dict_type:
+          type: string
+          description: Dictionary type code
+          example: sys_normal_disable
+        css_class:
+          type: string
+          nullable: true
+          description: CSS class for styling
+          example: ""
+        list_class:
+          type: string
+          nullable: true
+          description: List table class for styling
+          example: primary
+        is_default:
+          type: string
+          nullable: true
+          description: Whether this is the default value (Y/N)
+          enum: [Y, N]
+          example: Y
+        status:
+          type: string
+          description: Status (0=Normal, 1=Disabled)
+          enum: ["0", "1"]
+          example: "0"
+        create_by:
+          type: string
+          description: Creator username
+          example: admin
+        create_time:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        update_by:
+          type: string
+          description: Last updater username
+        update_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last update timestamp
+        remark:
+          type: string
+          nullable: true
+          description: Dictionary data description
+          example: Normal status
+
+    CreateDictDataRequest:
+      type: object
+      required:
+        - dict_type
+        - dict_label
+        - dict_value
+      properties:
+        dict_type:
+          type: string
+          description: Dictionary type code
+          example: sys_normal_disable
+        dict_label:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Dictionary label
+          example: Normal
+        dict_value:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Dictionary value
+          example: "0"
+        dict_sort:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Sort order
+        css_class:
+          type: string
+          maxLength: 100
+          description: CSS class
+        list_class:
+          type: string
+          maxLength: 100
+          description: List table class
+        is_default:
+          type: string
+          enum: [Y, N]
+          description: Whether this is the default value
+        status:
+          type: string
+          enum: ["0", "1"]
+          default: "0"
+          description: Status
+        remark:
+          type: string
+          maxLength: 500
+          description: Dictionary data description
+
+    UpdateDictDataRequest:
+      type: object
+      properties:
+        dict_label:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Dictionary label
+        dict_value:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Dictionary value
+        dict_sort:
+          type: integer
+          minimum: 0
+          description: Sort order
+        css_class:
+          type: string
+          maxLength: 100
+          description: CSS class
+        list_class:
+          type: string
+          maxLength: 100
+          description: List table class
+        is_default:
+          type: string
+          enum: [Y, N]
+          description: Whether this is the default value
+        status:
+          type: string
+          enum: ["0", "1"]
+          description: Status
+        remark:
+          type: string
+          maxLength: 500
+          description: Dictionary data description
+
+    SysDictDataResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/SysDictData'
+
+    SysDictDataListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/SysDictData'
+
+    # ================================================================
+    # SYS_MENU SCHEMAS
+    # ================================================================
+    SysMenu:
+      type: object
+      properties:
+        menu_id:
+          type: integer
+          format: int64
+          description: Menu ID
+          example: 1
+        menu_name:
+          type: string
+          description: Menu name
+          example: System Management
+        menu_type:
+          type: string
+          description: Menu type (M=Directory, C=Menu, F=Button)
+          enum: [M, C, F]
+          example: M
+        parent_id:
+          type: integer
+          format: int64
+          description: Parent menu ID (0 for root)
+          example: 0
+        order_num:
+          type: integer
+          description: Display order
+          example: 1
+        path:
+          type: string
+          nullable: true
+          description: Route path
+          example: /system
+        component:
+          type: string
+          nullable: true
+          description: Component path
+          example: ""
+        perms:
+          type: string
+          nullable: true
+          description: Permission identifier
+          example: ""
+        query:
+          type: string
+          nullable: true
+          description: Route query parameter
+          example: ""
+        route_name:
+          type: string
+          nullable: true
+          description: Route name (for Vue)
+          example: System
+        is_frame:
+          type: string
+          description: Whether external link (0=No, 1=Yes)
+          enum: ["0", "1"]
+          example: "1"
+        is_cache:
+          type: string
+          description: Whether cached (0=No, 1=Yes)
+          enum: ["0", "1"]
+          example: "0"
+        status:
+          type: string
+          description: Status (0=Normal, 1=Disabled)
+          enum: ["0", "1"]
+          example: "0"
+        visible:
+          type: string
+          description: Whether visible (0=Show, 1=Hide)
+          enum: ["0", "1"]
+          example: "0"
+        icon:
+          type: string
+          nullable: true
+          description: Menu icon
+          example: system
+        create_by:
+          type: string
+          description: Creator username
+          example: admin
+        create_time:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        update_by:
+          type: string
+          description: Last updater username
+        update_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last update timestamp
+        remark:
+          type: string
+          nullable: true
+          description: Menu description
+          example: System management directory
+        children:
+          type: array
+          nullable: true
+          description: Child menus (only in tree response)
+          items:
+            $ref: '#/components/schemas/SysMenu'
+
+    CreateMenuRequest:
+      type: object
+      required:
+        - menu_name
+        - menu_type
+        - parent_id
+      properties:
+        menu_name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Menu name
+          example: User Management
+        menu_type:
+          type: string
+          enum: [M, C, F]
+          description: Menu type (M=Directory, C=Menu, F=Button)
+        parent_id:
+          type: integer
+          format: int64
+          description: Parent menu ID (0 for root)
+          example: 1
+        order_num:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Display order
+        path:
+          type: string
+          maxLength: 200
+          description: Route path (required for M and C types)
+          example: /system/user
+        component:
+          type: string
+          maxLength: 255
+          description: Component path (required for C type)
+          example: system/user/index
+        perms:
+          type: string
+          maxLength: 100
+          description: Permission identifier (required for F type, multiple separated by comma)
+          example: system:user:list
+        query:
+          type: string
+          maxLength: 255
+          description: Route query parameter
+        route_name:
+          type: string
+          maxLength: 50
+          description: Route name (for Vue)
+        is_frame:
+          type: string
+          enum: ["0", "1"]
+          default: "0"
+          description: Whether external link
+        is_cache:
+          type: string
+          enum: ["0", "1"]
+          default: "0"
+          description: Whether cached
+        status:
+          type: string
+          enum: ["0", "1"]
+          default: "0"
+          description: Status
+        visible:
+          type: string
+          enum: ["0", "1"]
+          default: "0"
+          description: Whether visible
+        icon:
+          type: string
+          maxLength: 100
+          description: Menu icon
+        remark:
+          type: string
+          maxLength: 500
+          description: Menu description
+
+    UpdateMenuRequest:
+      type: object
+      properties:
+        menu_name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Menu name
+        order_num:
+          type: integer
+          minimum: 0
+          description: Display order
+        path:
+          type: string
+          maxLength: 200
+          description: Route path
+        component:
+          type: string
+          maxLength: 255
+          description: Component path
+        perms:
+          type: string
+          maxLength: 100
+          description: Permission identifier
+        query:
+          type: string
+          maxLength: 255
+          description: Route query parameter
+        route_name:
+          type: string
+          maxLength: 50
+          description: Route name
+        is_frame:
+          type: string
+          enum: ["0", "1"]
+          description: Whether external link
+        is_cache:
+          type: string
+          enum: ["0", "1"]
+          description: Whether cached
+        status:
+          type: string
+          enum: ["0", "1"]
+          description: Status
+        visible:
+          type: string
+          enum: ["0", "1"]
+          description: Whether visible
+        icon:
+          type: string
+          maxLength: 100
+          description: Menu icon
+        remark:
+          type: string
+          maxLength: 500
+          description: Menu description
+
+    SysMenuResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/SysMenu'
+
+    SysMenusResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/SysMenu'
+
+    SysMenuTreeResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              description: Menu tree structure
+              items:
+                $ref: '#/components/schemas/SysMenu'
