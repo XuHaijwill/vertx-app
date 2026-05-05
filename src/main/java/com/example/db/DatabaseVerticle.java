@@ -74,7 +74,9 @@ public class DatabaseVerticle extends AbstractVerticle {
             .compose(v -> {
                 context.put(DB_POOL, pool);
                 String connUri = String.format("postgresql://%s:%s@%s:%d/%s", user, password, host, port, database);
-                vertx.sharedData().getLocalMap("db").put("conn-uri", connUri);
+                var map = vertx.sharedData().getLocalMap("db");
+                map.put("conn-uri", connUri);
+                map.put("shared-pool", pool);  // cache pool for cross-verticle access
                 LOG.info("[DB] PostgreSQL connected");
                 startPromise.complete();
                 return Future.succeededFuture();
@@ -105,17 +107,27 @@ public class DatabaseVerticle extends AbstractVerticle {
         if (vertx == null) return null;
         Pool p = (Pool) vertx.getOrCreateContext().get(DB_POOL);
         if (p != null) return p;
+        // Fallback: check shared data for conn-uri (cross-verticle access)
         var map = vertx.sharedData().getLocalMap("db");
-        String connUri = map != null ? (String) map.get("conn-uri") : null;
-        if (connUri != null) {
+        if (map == null) return null;
+        // Try to get a shared pool instance from shared data (set during start())
+        Object sharedPool = map.get("shared-pool");
+        if (sharedPool instanceof Pool pool) return pool;
+        // Last resort: rebuild from URI (only once, cache in shared data)
+        String connUri = (String) map.get("conn-uri");
+        if (connUri != null && !map.containsKey("pool-rebuild-attempted")) {
             try {
                 PgConnectOptions opts = PgConnectOptions.fromUri(connUri);
                 PoolOptions poolOpts = new PoolOptions()
                     .setMaxSize(10).setName("vertx-app-pool").setShared(true);
-                return PgBuilder.pool()
+                Pool rebuilt = PgBuilder.pool()
                     .with(poolOpts).connectingTo(opts).using(vertx).build();
+                map.put("shared-pool", rebuilt);  // cache to avoid re-creating
+                map.put("pool-rebuild-attempted", true);
+                return rebuilt;
             } catch (Exception e) {
                 LOG.warn("[DB] Failed to rebuild shared pool from URI", e);
+                map.put("pool-rebuild-attempted", true);
             }
         }
         return null;

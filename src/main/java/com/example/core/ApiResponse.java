@@ -18,13 +18,15 @@ public class ApiResponse {
     private long duration;
     private int _httpStatus = 200;
 
-    // Customizable key mapping (defaults)
-    private static io.vertx.core.json.JsonObject keys = new io.vertx.core.json.JsonObject()
-        .put("code", "code")
-        .put("message", "message")
-        .put("data", "data")
-        .put("timestamp", "timestamp")
-        .put("duration", "duration");
+    // Customizable key mapping (defaults) — thread-safe via ConcurrentHashMap
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> keys = new java.util.concurrent.ConcurrentHashMap<>();
+    static {
+        keys.put("code", "code");
+        keys.put("message", "message");
+        keys.put("data", "data");
+        keys.put("timestamp", "timestamp");
+        keys.put("duration", "duration");
+    }
 
     // Extra top-level keys for this response (e.g. permission, count, etc.)
     private final io.vertx.core.json.JsonObject extra = new io.vertx.core.json.JsonObject();
@@ -140,11 +142,11 @@ public class ApiResponse {
     public JsonObject toJson() {
         JsonObject json = new JsonObject();
         // Use configured keys (fall back to defaults)
-        String kCode = keys.getString("code", "code");
-        String kMsg = keys.getString("message", "message");
-        String kData = keys.getString("data", "data");
-        String kTs = keys.getString("timestamp", "timestamp");
-        String kDur = keys.getString("duration", "duration");
+        String kCode = keys.getOrDefault("code", "code");
+        String kMsg = keys.getOrDefault("message", "message");
+        String kData = keys.getOrDefault("data", "data");
+        String kTs = keys.getOrDefault("timestamp", "timestamp");
+        String kDur = keys.getOrDefault("duration", "duration");
 
         json.put(kCode, code).put(kMsg, message).put(kTs, timestamp);
         if (data != null) json.put(kData, data);
@@ -166,7 +168,7 @@ public class ApiResponse {
         if (resp == null) return;
         io.vertx.core.json.JsonObject k = resp.getJsonObject("keys");
         if (k == null) return;
-        // Merge provided keys into defaults
+        // Merge provided keys into defaults (thread-safe)
         for (String field : k.fieldNames()) {
             String val = k.getString(field);
             if (val != null && !val.isEmpty()) keys.put(field, val);

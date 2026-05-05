@@ -21,7 +21,7 @@ public class PageResult<T> {
         this.total = total;
         this.page = page;
         this.size = size;
-        this.pages = (total + size - 1) / size;
+        this.pages = size > 0 ? (total + size - 1) / size : 0;
     }
 
     public JsonObject toJson() {

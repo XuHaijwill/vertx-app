@@ -1,5 +1,7 @@
 package com.example.db;
 
+import io.vertx.core.Context;
+import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 
 /**
@@ -31,20 +33,35 @@ import io.vertx.core.json.JsonObject;
  */
 public class AuditContextHolder {
 
-    private static final ThreadLocal<AuditContext> HOLDER = new ThreadLocal<>();
+    private static final String AUDIT_KEY = "vertx.audit.context";
+
+    // ThreadLocal fallback for non-Vert.x threads
+    private static final ThreadLocal<AuditContext> FALLBACK = new ThreadLocal<>();
+
+    private AuditContextHolder() {}
 
     /**
-     * 绑定审计上下文到当前线程。
+     * 绑定审计上下文到当前 Vert.x Context。
+     * 如果不在 Vert.x 线程中，fallback 到 ThreadLocal。
      */
     public static void bind(AuditContext ctx) {
-        HOLDER.set(ctx);
+        Context vertxContext = Vertx.currentContext();
+        if (vertxContext != null) {
+            vertxContext.put(AUDIT_KEY, ctx);
+        } else {
+            FALLBACK.set(ctx);
+        }
     }
 
     /**
      * 返回当前绑定的审计上下文，可能为 null（未鉴权或未设置）。
      */
     public static AuditContext current() {
-        return HOLDER.get();
+        Context vertxContext = Vertx.currentContext();
+        if (vertxContext != null) {
+            return (AuditContext) vertxContext.get(AUDIT_KEY);
+        }
+        return FALLBACK.get();
     }
 
     /**
@@ -52,7 +69,7 @@ public class AuditContextHolder {
      * 用于 Service 层在无法保证上层已绑定时兜底。
      */
     public static AuditContext currentOrNew() {
-        AuditContext ctx = HOLDER.get();
+        AuditContext ctx = current();
         if (ctx == null) {
             ctx = new AuditContext();
         }
@@ -63,7 +80,7 @@ public class AuditContextHolder {
      * 检查是否已绑定上下文。
      */
     public static boolean isActive() {
-        return HOLDER.get() != null;
+        return current() != null;
     }
 
     /**
@@ -71,19 +88,22 @@ public class AuditContextHolder {
      * 推荐在 HTTP 响应发送前调用。
      */
     public static AuditContext unbind() {
-        AuditContext ctx = HOLDER.get();
-        HOLDER.remove();
+        Context vertxContext = Vertx.currentContext();
+        if (vertxContext != null) {
+            AuditContext ctx = (AuditContext) vertxContext.get(AUDIT_KEY);
+            vertxContext.remove(AUDIT_KEY);
+            return ctx;
+        }
+        AuditContext ctx = FALLBACK.get();
+        FALLBACK.remove();
         return ctx;
     }
 
     /**
-     * 安全解绑 — 如果当前线程没有绑定上下文也不会报错。
+     * 安全解绑 — 如果当前没有绑定上下文也不会报错。
      */
     public static void unbindIfPresent() {
-        AuditContext ctx = HOLDER.get();
-        if (ctx != null) {
-            HOLDER.remove();
-        }
+        unbind();
     }
 
     /**
@@ -91,7 +111,7 @@ public class AuditContextHolder {
      * 如果没有上下文，返回一个填充了默认值的对象。
      */
     public static JsonObject toLogRecord(String traceId) {
-        AuditContext ctx = HOLDER.get();
+        AuditContext ctx = current();
         JsonObject record = new JsonObject();
         if (ctx != null) {
             record.put("traceId", ctx.getTraceId())
