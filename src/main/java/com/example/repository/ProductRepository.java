@@ -196,6 +196,16 @@ public class ProductRepository {
             .map(rows -> rows.iterator().next().getBoolean("exists"));
     }
 
+    /**
+     * Check if a product with the given ID exists.
+     */
+    public Future<Boolean> existsById(Long id) {
+        String sql = "SELECT EXISTS(SELECT 1 FROM products WHERE id = $1) as exists";
+        Tuple params = Tuple.tuple().addLong(id);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> rows.iterator().next().getBoolean("exists"));
+    }
+
     // ================================================================
     // Declarative-transaction variants (auto-route via TxContextHolder)
     // These are the preferred entry points for @Transactional service methods.

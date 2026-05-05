@@ -1,9 +1,8 @@
 package com.example.api;
 
-import com.example.core.BusinessException;
 import com.example.core.RequestValidator;
 import com.example.service.UserService;
-import com.example.service.UserServiceImpl;
+import com.example.service.impl.UserServiceImpl;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;

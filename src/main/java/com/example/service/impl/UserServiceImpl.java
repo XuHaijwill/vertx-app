@@ -1,10 +1,11 @@
-package com.example.service;
+package com.example.service.impl;
 
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
 import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
 import com.example.repository.UserRepository;
+import com.example.service.UserService;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;

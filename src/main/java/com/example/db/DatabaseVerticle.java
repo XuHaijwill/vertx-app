@@ -76,7 +76,10 @@ public class DatabaseVerticle extends AbstractVerticle {
                 String connUri = String.format("postgresql://%s:%s@%s:%d/%s", user, password, host, port, database);
                 var map = vertx.sharedData().getLocalMap("db");
                 map.put("conn-uri", connUri);
-                map.put("shared-pool", pool);  // cache pool for cross-verticle access
+                // Do NOT store the Pool instance in shared data - it's not a supported
+                // type for LocalMap and will cause IllegalArgumentException.
+                // Keep the pool in the verticle/context only:
+                context.put(DB_POOL, pool);
                 LOG.info("[DB] PostgreSQL connected");
                 startPromise.complete();
                 return Future.succeededFuture();
@@ -110,24 +113,24 @@ public class DatabaseVerticle extends AbstractVerticle {
         // Fallback: check shared data for conn-uri (cross-verticle access)
         var map = vertx.sharedData().getLocalMap("db");
         if (map == null) return null;
-        // Try to get a shared pool instance from shared data (set during start())
-        Object sharedPool = map.get("shared-pool");
-        if (sharedPool instanceof Pool pool) return pool;
-        // Last resort: rebuild from URI (only once, cache in shared data)
+        // Do NOT store Pool instances in shared data (LocalMap) - they are not
+        // supported and will cause IllegalArgumentException. Instead we can
+        // rebuild a pool from the conn-uri and cache it in the Vert.x Context
+        // for this Vertx instance.
         String connUri = (String) map.get("conn-uri");
-        if (connUri != null && !map.containsKey("pool-rebuild-attempted")) {
+        if (connUri != null) {
             try {
                 PgConnectOptions opts = PgConnectOptions.fromUri(connUri);
                 PoolOptions poolOpts = new PoolOptions()
                     .setMaxSize(10).setName("vertx-app-pool").setShared(true);
                 Pool rebuilt = PgBuilder.pool()
                     .with(poolOpts).connectingTo(opts).using(vertx).build();
-                map.put("shared-pool", rebuilt);  // cache to avoid re-creating
-                map.put("pool-rebuild-attempted", true);
+                // Cache the rebuilt pool in this Vert.x Context (not shared data)
+                vertx.getOrCreateContext().put(DB_POOL, rebuilt);
                 return rebuilt;
             } catch (Exception e) {
                 LOG.warn("[DB] Failed to rebuild shared pool from URI", e);
-                map.put("pool-rebuild-attempted", true);
+                // don't set non-serializable values in shared data; just log
             }
         }
         return null;

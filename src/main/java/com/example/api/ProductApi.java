@@ -1,7 +1,7 @@
 package com.example.api;
 
 import com.example.service.ProductService;
-import com.example.service.ProductServiceImpl;
+import com.example.service.impl.ProductServiceImpl;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;

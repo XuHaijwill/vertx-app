@@ -164,7 +164,8 @@ public class MainVerticle extends AbstractVerticle {
                 contextPath + "/api/products/",
                 contextPath + "/api/sys-configs",
                 contextPath + "/api/sys-configs/",
-                contextPath + "/api/menus"
+                contextPath + "/api/menus",
+                contextPath + "/api/menus/"
 
         ));
 
