@@ -1,6 +1,7 @@
 package com.example.api;
 
 import com.example.core.RequestValidator;
+import com.example.entity.User;
 import com.example.service.UserService;
 import com.example.service.impl.UserServiceImpl;
 import io.vertx.core.Vertx;
@@ -64,7 +65,7 @@ public class UserApi extends BaseApi {
             badRequest(ctx, vr.getErrors().toString());
             return;
         }
-        respondCreated(ctx, userService.create(body));
+        respondCreated(ctx, userService.create(User.fromJson(body)));
     }
 
     private void update(RoutingContext ctx) {
@@ -73,7 +74,7 @@ public class UserApi extends BaseApi {
             badRequest(ctx, "Invalid user ID");
             return;
         }
-        respond(ctx, userService.update(id, bodyJson(ctx)));
+        respond(ctx, userService.update(id, User.fromJson(bodyJson(ctx))));
     }
 
     private void delete(RoutingContext ctx) {
@@ -95,9 +96,9 @@ public class UserApi extends BaseApi {
             badRequest(ctx, "Request body must contain a non-empty 'items' array");
             return;
         }
-        List<JsonObject> users = new ArrayList<>();
+        List<User> users = new ArrayList<>();
         for (int i = 0; i < body.size(); i++) {
-            users.add(body.getJsonObject(i));
+            users.add(User.fromJson(body.getJsonObject(i)));
         }
         respond(ctx, userService.batchCreate(users));
     }
@@ -108,9 +109,9 @@ public class UserApi extends BaseApi {
             badRequest(ctx, "Request body must contain a non-empty 'items' array");
             return;
         }
-        List<JsonObject> users = new ArrayList<>();
+        List<User> users = new ArrayList<>();
         for (int i = 0; i < body.size(); i++) {
-            users.add(body.getJsonObject(i));
+            users.add(User.fromJson(body.getJsonObject(i)));
         }
         respond(ctx, userService.batchUpdate(users));
     }

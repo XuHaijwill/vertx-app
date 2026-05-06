@@ -3,13 +3,18 @@ package com.example.repository;
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
 import com.example.db.TxContextHolder;
+import com.example.entity.User;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
+import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.Tuple;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 /**
  * User Repository - Database operations for users.
@@ -28,36 +33,44 @@ public class UserRepository {
     }
 
     // ================================================================
+    // Row → User mapping helper
+    // ================================================================
+
+    private List<User> toUserList(RowSet<Row> rows) {
+        return StreamSupport.stream(rows.spliterator(), false)
+            .map(User::toUser)
+            .collect(Collectors.toList());
+    }
+
+    private User toUserOne(RowSet<Row> rows) {
+        return rows.iterator().hasNext() ? User.toUser(rows.iterator().next()) : null;
+    }
+
+    // ================================================================
     // Pool-based queries (standalone, no transaction)
     // ================================================================
 
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<User>> findAll() {
         String sql = "SELECT * FROM users ORDER BY id";
         return DatabaseVerticle.query(vertx, sql)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toUserList);
     }
 
-    public Future<JsonObject> findById(Long id) {
+    public Future<User> findById(Long id) {
         String sql = "SELECT * FROM users WHERE id = $1";
         Tuple params = Tuple.tuple().addLong(id);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+            .map(this::toUserOne);
     }
 
-    public Future<JsonObject> findByEmail(String email) {
+    public Future<User> findByEmail(String email) {
         String sql = "SELECT * FROM users WHERE email = $1";
         Tuple params = Tuple.tuple().addString(email);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+            .map(this::toUserOne);
     }
 
-    public Future<List<JsonObject>> search(String keyword) {
+    public Future<List<User>> search(String keyword) {
         String sql = "SELECT * FROM users WHERE " +
             "LOWER(name) LIKE LOWER($1) OR " +
             "LOWER(email) LIKE LOWER($1) OR " +
@@ -66,21 +79,21 @@ public class UserRepository {
         String pattern = "%" + keyword + "%";
         Tuple params = Tuple.tuple().addString(pattern);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toUserList);
     }
 
-    public Future<List<JsonObject>> findByDepartment(String department) {
+    public Future<List<User>> findByDepartment(String department) {
         String sql = "SELECT * FROM users WHERE LOWER(department) = LOWER($1) ORDER BY id";
         Tuple params = Tuple.tuple().addString(department);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toUserList);
     }
 
-    public Future<List<JsonObject>> findByStatus(String status) {
+    public Future<List<User>> findByStatus(String status) {
         String sql = "SELECT * FROM users WHERE status = $1 ORDER BY id";
         Tuple params = Tuple.tuple().addString(status);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toUserList);
     }
 
     public Future<Long> count() {
@@ -89,20 +102,20 @@ public class UserRepository {
             .map(rows -> rows.iterator().next().getLong("count"));
     }
 
-    public Future<JsonObject> create(JsonObject user) {
+    public Future<User> create(User user) {
         String sql = "INSERT INTO users (name, email, age, department, status) " +
             "VALUES ($1, $2, $3, $4, $5) RETURNING *";
         Tuple params = Tuple.tuple()
-            .addString(user.getString("name"))
-            .addString(user.getString("email"))
-            .addInteger(user.getInteger("age"))
-            .addString(user.getString("department"))
-            .addString(user.getString("status", "active"));
+            .addString(user.getName())
+            .addString(user.getEmail())
+            .addInteger(user.getAge())
+            .addString(user.getDepartment())
+            .addString(user.getStatus() != null ? user.getStatus() : "active");
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> DatabaseVerticle.toJson(rows.iterator().next()));
+            .map(this::toUserOne);
     }
 
-    public Future<JsonObject> update(Long id, JsonObject user) {
+    public Future<User> update(Long id, User user) {
         String sql = "UPDATE users SET " +
             "name = COALESCE($1, name), " +
             "email = COALESCE($2, email), " +
@@ -112,17 +125,14 @@ public class UserRepository {
             "updated_at = CURRENT_TIMESTAMP " +
             "WHERE id = $6 RETURNING *";
         Tuple params = Tuple.tuple()
-            .addString(user.getString("name"))
-            .addString(user.getString("email"))
-            .addInteger(user.getInteger("age"))
-            .addString(user.getString("department"))
-            .addString(user.getString("status"))
+            .addString(user.getName())
+            .addString(user.getEmail())
+            .addInteger(user.getAge())
+            .addString(user.getDepartment())
+            .addString(user.getStatus())
             .addLong(id);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+            .map(this::toUserOne);
     }
 
     public Future<Boolean> delete(Long id) {
@@ -134,31 +144,31 @@ public class UserRepository {
 
     public Future<Integer> deleteByIds(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return Future.succeededFuture(0);
-        String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
+        String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(Collectors.joining(","));
         String sql = "DELETE FROM users WHERE id IN (" + placeholders + ")";
         Tuple params = Tuple.tuple();
         for (Long id : ids) params.addLong(id);
         return DatabaseVerticle.query(vertx, sql, params).map(rows -> rows.rowCount());
     }
 
-    public Future<List<JsonObject>> createBatch(List<JsonObject> users) {
+    public Future<List<User>> createBatch(List<User> users) {
         if (users == null || users.isEmpty()) return Future.succeededFuture(List.of());
         List<String> columns = List.of("name", "email", "age", "department", "status");
         List<List<Object>> values = users.stream().map(u -> List.<Object>of(
-            u.getString("name"),
-            u.getString("email"),
-            u.getInteger("age"),
-            u.getString("department"),
-            u.getString("status", "active")
-        )).collect(java.util.stream.Collectors.toList());
+            u.getName(),
+            u.getEmail(),
+            u.getAge(),
+            u.getDepartment(),
+            u.getStatus() != null ? u.getStatus() : "active"
+        )).collect(Collectors.toList());
         return com.example.db.BatchOperations.multiRowInsert(vertx, "users", columns, values, "id")
             .compose(ids -> {
-                if (ids.isEmpty()) return Future.succeededFuture(List.<JsonObject>of());
-                String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
+                if (ids.isEmpty()) return Future.succeededFuture(List.<User>of());
+                String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(Collectors.joining(","));
                 Tuple params = Tuple.tuple();
                 for (Long id : ids) params.addLong(id);
                 return DatabaseVerticle.query(vertx, "SELECT * FROM users WHERE id IN (" + placeholders + ") ORDER BY id", params)
-                    .map(DatabaseVerticle::toJsonList);
+                    .map(this::toUserList);
             });
     }
 
@@ -173,15 +183,15 @@ public class UserRepository {
     // Pagination
     // ================================================================
 
-    public Future<List<JsonObject>> findPaginated(int page, int size) {
+    public Future<List<User>> findPaginated(int page, int size) {
         int offset = (page - 1) * size;
         String sql = "SELECT * FROM users ORDER BY id LIMIT $1 OFFSET $2";
         Tuple params = Tuple.tuple().addInteger(size).addInteger(offset);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toUserList);
     }
 
-    public Future<List<JsonObject>> searchPaginated(String keyword, int page, int size) {
+    public Future<List<User>> searchPaginated(String keyword, int page, int size) {
         int offset = (page - 1) * size;
         String sql = "SELECT * FROM users WHERE " +
             "LOWER(name) LIKE LOWER($1) OR " +
@@ -191,7 +201,7 @@ public class UserRepository {
         String pattern = "%" + keyword + "%";
         Tuple params = Tuple.tuple().addString(pattern).addInteger(size).addInteger(offset);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toUserList);
     }
 
     public Future<Long> searchCount(String keyword) {
@@ -211,10 +221,8 @@ public class UserRepository {
 
     /**
      * Lock user row with FOR UPDATE — auto-detects active transaction.
-     *
-     * @see #findByIdForUpdate(TransactionContext, Long)
      */
-    public Future<JsonObject> findByIdForUpdate(Long userId) {
+    public Future<User> findByIdForUpdate(Long userId) {
         TransactionContext tx = TxContextHolder.current();
         if (tx != null) return findByIdForUpdateInTx(tx, userId);
         return DatabaseVerticle.withTransaction(vertx,
@@ -223,8 +231,6 @@ public class UserRepository {
 
     /**
      * Deduct user balance — auto-detects active transaction.
-     *
-     * @see #deductBalance(TransactionContext, Long, BigDecimal)
      */
     public Future<Void> deductBalance(Long userId, BigDecimal amount) {
         TransactionContext tx = TxContextHolder.current();
@@ -235,8 +241,6 @@ public class UserRepository {
 
     /**
      * Add balance back — auto-detects active transaction (e.g., refund).
-     *
-     * @see #addBalance(TransactionContext, Long, BigDecimal)
      */
     public Future<Void> addBalance(Long userId, BigDecimal amount) {
         TransactionContext tx = TxContextHolder.current();
@@ -247,8 +251,6 @@ public class UserRepository {
 
     /**
      * Update user's order_count — auto-detects active transaction.
-     *
-     * @see #updateUserOrderCount(TransactionContext, Long, int)
      */
     public Future<Void> updateUserOrderCount(Long userId, int delta) {
         TransactionContext tx = TxContextHolder.current();
@@ -264,13 +266,12 @@ public class UserRepository {
     /**
      * Lock user row with FOR UPDATE — explicit transaction.
      */
-    public Future<JsonObject> findByIdForUpdate(TransactionContext tx, Long id) {
+    public Future<User> findByIdForUpdate(TransactionContext tx, Long id) {
         return findByIdForUpdateInTx(tx, id);
     }
 
     /**
      * Deduct user balance — explicit transaction.
-     * Fails if balance is insufficient.
      */
     public Future<Void> deductBalance(TransactionContext tx, Long userId, BigDecimal amount) {
         return deductBalanceInTx(tx, userId, amount);
@@ -294,11 +295,12 @@ public class UserRepository {
     // Private internal implementations
     // ================================================================
 
-    private Future<JsonObject> findByIdForUpdateInTx(TransactionContext tx, Long id) {
+    private Future<User> findByIdForUpdateInTx(TransactionContext tx, Long id) {
         tx.tick();
         String sql = "SELECT * FROM users WHERE id = $1 FOR UPDATE";
         Tuple params = Tuple.tuple().addLong(id);
-        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params);
+        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params)
+            .map(json -> json != null ? User.fromJson(json) : null);
     }
 
     private Future<Void> deductBalanceInTx(TransactionContext tx, Long userId, BigDecimal amount) {

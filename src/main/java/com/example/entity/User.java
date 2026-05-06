@@ -3,6 +3,7 @@ package com.example.entity;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import io.vertx.core.json.JsonObject;
+import io.vertx.sqlclient.Row;
 
 public class User {
     private Long id;
@@ -56,6 +57,44 @@ public class User {
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    /**
+     * Create a User from a JSON object (e.g. request body).
+     * Only writable fields are mapped; id/createdAt/updatedAt are ignored.
+     */
+    public static User fromJson(JsonObject json) {
+        if (json == null) return null;
+        User u = new User();
+        if (json.containsKey("id")) u.setId(json.getLong("id"));
+        u.setName(json.getString("name"));
+        u.setEmail(json.getString("email"));
+        u.setAge(json.getInteger("age"));
+        u.setDepartment(json.getString("department"));
+        u.setStatus(json.getString("status"));
+        Object balanceObj = json.getValue("balance");
+        u.setBalance(balanceObj != null ? new BigDecimal(balanceObj.toString()) : null);
+        u.setOrderCount(json.getInteger("orderCount"));
+        return u;
+    }
+
+    /**
+     * Create a User from a database Row.
+     */
+    public static User toUser(Row row) {
+        if (row == null) return null;
+        User u = new User();
+        u.setId(row.getLong("id"));
+        u.setName(row.getString("name"));
+        u.setEmail(row.getString("email"));
+        u.setAge(row.getInteger("age"));
+        u.setDepartment(row.getString("department"));
+        u.setStatus(row.getString("status"));
+        u.setBalance(row.getBigDecimal("balance"));
+        u.setOrderCount(row.getInteger("order_count"));
+        u.setCreatedAt(row.getLocalDateTime("created_at"));
+        u.setUpdatedAt(row.getLocalDateTime("updated_at"));
+        return u;
+    }
 
     public JsonObject toJson() {
         JsonObject json = new JsonObject();
