@@ -1,6 +1,7 @@
 package com.example.api;
 
 import com.example.core.PageResult;
+import com.example.entity.SysDictType;
 import com.example.service.SysDictTypeService;
 import com.example.service.impl.SysDictTypeServiceImpl;
 import io.vertx.core.Vertx;
@@ -78,7 +79,7 @@ public class SysDictTypeApi extends BaseApi {
             badRequest(ctx, "Request body is required");
             return;
         }
-        respondCreated(ctx, service.create(body));
+        respondCreated(ctx, service.create(SysDictType.fromJson(body)));
     }
 
     private void updateDictType(RoutingContext ctx) {
@@ -92,7 +93,7 @@ public class SysDictTypeApi extends BaseApi {
             badRequest(ctx, "Request body is required");
             return;
         }
-        respond(ctx, service.update(id, body));
+        respond(ctx, service.update(id, SysDictType.fromJson(body)));
     }
 
     private void deleteDictType(RoutingContext ctx) {

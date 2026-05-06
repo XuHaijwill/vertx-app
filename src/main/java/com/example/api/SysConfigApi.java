@@ -1,6 +1,6 @@
 package com.example.api;
 
-import com.example.core.PageResult;
+import com.example.entity.SysConfig;
 import com.example.service.SysConfigService;
 import com.example.service.impl.SysConfigServiceImpl;
 import io.vertx.core.Vertx;
@@ -8,6 +8,7 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -38,8 +39,8 @@ public class SysConfigApi extends BaseApi {
 
     private void listConfigs(RoutingContext ctx) {
         String configName = queryStr(ctx, "configName");
-        String configKey = queryStr(ctx, "configKey");
-        String group = queryStr(ctx, "group");
+        String configKey  = queryStr(ctx, "configKey");
+        String group      = queryStr(ctx, "group");
         int page = queryInt(ctx, "page", 1);
         int size = queryIntClamped(ctx, "size", 20, 1, 100);
 
@@ -54,51 +55,37 @@ public class SysConfigApi extends BaseApi {
 
     private void getConfig(RoutingContext ctx) {
         Long id = parseId(ctx.pathParam("id"));
-        if (id == null) {
-            badRequest(ctx, "Invalid config ID");
-            return;
-        }
+        if (id == null) { badRequest(ctx, "Invalid config ID"); return; }
         respond(ctx, service.findById(id));
     }
 
     private void getConfigByKey(RoutingContext ctx) {
         String configKey = ctx.pathParam("configKey");
-        if (configKey == null || configKey.isBlank()) {
-            badRequest(ctx, "configKey is required");
-            return;
-        }
+        if (configKey == null || configKey.isBlank()) { badRequest(ctx, "configKey is required"); return; }
         respond(ctx, service.findByConfigKey(configKey));
     }
 
     private void createConfig(RoutingContext ctx) {
         JsonObject body = ctx.body().asJsonObject();
-        if (body == null) {
-            badRequest(ctx, "Request body is required");
-            return;
-        }
-        respondCreated(ctx, service.create(body));
+        if (body == null) { badRequest(ctx, "Request body is required"); return; }
+        // API boundary: JsonObject → Entity
+        SysConfig entity = SysConfig.fromJson(body);
+        respondCreated(ctx, service.create(entity.toJson()));
     }
 
     private void updateConfig(RoutingContext ctx) {
         Long id = parseId(ctx.pathParam("id"));
-        if (id == null) {
-            badRequest(ctx, "Invalid config ID");
-            return;
-        }
+        if (id == null) { badRequest(ctx, "Invalid config ID"); return; }
         JsonObject body = ctx.body().asJsonObject();
-        if (body == null) {
-            badRequest(ctx, "Request body is required");
-            return;
-        }
-        respond(ctx, service.update(id, body));
+        if (body == null) { badRequest(ctx, "Request body is required"); return; }
+        // API boundary: JsonObject → Entity
+        SysConfig entity = SysConfig.fromJson(body);
+        respond(ctx, service.update(id, entity.toJson()));
     }
 
     private void deleteConfig(RoutingContext ctx) {
         Long id = parseId(ctx.pathParam("id"));
-        if (id == null) {
-            badRequest(ctx, "Invalid config ID");
-            return;
-        }
+        if (id == null) { badRequest(ctx, "Invalid config ID"); return; }
         respondDeleted(ctx, service.delete(id));
     }
 }

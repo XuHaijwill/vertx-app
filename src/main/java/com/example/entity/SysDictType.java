@@ -2,6 +2,7 @@ package com.example.entity;
 
 import java.time.LocalDateTime;
 import io.vertx.core.json.JsonObject;
+import io.vertx.sqlclient.Row;
 
 public class SysDictType {
     private Long dictId;
@@ -48,6 +49,34 @@ public class SysDictType {
 
     public String getRemark() { return remark; }
     public void setRemark(String remark) { this.remark = remark; }
+
+    /** Row → SysDictType */
+    public static SysDictType toSysDictType(Row row) {
+        SysDictType d = new SysDictType();
+        d.setDictId(row.getLong("dict_id"));
+        d.setDictName(row.getString("dict_name"));
+        d.setDictType(row.getString("dict_type"));
+        d.setStatus(row.getString("status"));
+        d.setCreateBy(row.getString("create_by"));
+        d.setCreateTime(row.getLocalDateTime("create_time"));
+        d.setUpdateBy(row.getString("update_by"));
+        d.setUpdateTime(row.getLocalDateTime("update_time"));
+        d.setRemark(row.getString("remark"));
+        return d;
+    }
+
+    /** JsonObject → SysDictType (from API request body) */
+    public static SysDictType fromJson(JsonObject json) {
+        SysDictType d = new SysDictType();
+        d.setDictId(json.getLong("dictId"));
+        d.setDictName(json.getString("dictName"));
+        d.setDictType(json.getString("dictType"));
+        d.setStatus(json.getString("status", "0"));
+        d.setCreateBy(json.getString("createBy", "admin"));
+        d.setUpdateBy(json.getString("updateBy"));
+        d.setRemark(json.getString("remark"));
+        return d;
+    }
 
     public JsonObject toJson() {
         JsonObject json = new JsonObject();

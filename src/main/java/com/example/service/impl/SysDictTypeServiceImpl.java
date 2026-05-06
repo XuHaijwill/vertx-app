@@ -5,6 +5,7 @@ import com.example.core.PageResult;
 import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
 import com.example.db.DatabaseVerticle;
+import com.example.entity.SysDictType;
 import com.example.repository.SysDictTypeRepository;
 import com.example.service.SysDictTypeService;
 import io.vertx.core.Future;
@@ -14,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * System Dictionary Type Service Implementation
@@ -32,14 +34,45 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
         this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
 
+    // ================================================================
+    // HELPERS
+    // ================================================================
+
+    private static List<JsonObject> toJsonObjectList(List<SysDictType> list) {
+        return list.stream().map(SysDictType::toJson).collect(Collectors.toList());
+    }
+
+    /** create/update 内部执行 + 审计，返回 SysDictType */
+    private Future<SysDictType> doCreate(SysDictType dictType) {
+        return repo.create(dictType)
+            .compose(created -> audit.log(
+                    AuditAction.AUDIT_CREATE, "sys_dict_type",
+                    String.valueOf(created.getDictId()),
+                    null, created.toJson())
+                .map(created));
+    }
+
+    private Future<SysDictType> doUpdate(Long id, SysDictType dictType, SysDictType existing) {
+        return repo.update(id, dictType)
+            .compose(updated -> audit.log(
+                    AuditAction.AUDIT_UPDATE, "sys_dict_type",
+                    String.valueOf(id),
+                    existing.toJson(), updated.toJson())
+                .map(updated));
+    }
+
+    // ================================================================
+    // IMPLEMENTATIONS
+    // ================================================================
+
     @Override
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<SysDictType>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(List.of());
         return repo.findAll();
     }
 
     @Override
-    public Future<JsonObject> findById(Long id) {
+    public Future<SysDictType> findById(Long id) {
         if (!dbAvailable) return Future.succeededFuture(null);
         return repo.findById(id)
             .map(dict -> {
@@ -49,23 +82,23 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
     }
 
     @Override
-    public Future<JsonObject> findByDictType(String dictType) {
+    public Future<SysDictType> findByDictType(String dictType) {
         if (!dbAvailable) return Future.succeededFuture(null);
         return repo.findByDictType(dictType);
     }
 
     @Override
-    public Future<JsonObject> create(JsonObject dictType) {
+    public Future<JsonObject> create(SysDictType dictType) {
         if (dictType == null) {
             return Future.failedFuture(BusinessException.badRequest("Request body is required"));
         }
-        String type = dictType.getString("dictType");
+        String type = dictType.getDictType();
         if (type == null || type.isBlank()) {
             return Future.failedFuture(BusinessException.badRequest("dictType is required"));
         }
 
         if (!dbAvailable) {
-            return Future.succeededFuture(dictType.copy().put("dictId", System.currentTimeMillis()));
+            return Future.succeededFuture(dictType.toJson().put("dictId", System.currentTimeMillis()));
         }
 
         return repo.existsByDictType(type)
@@ -74,47 +107,32 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
                     return Future.<JsonObject>failedFuture(
                         BusinessException.conflict("Dict type already exists: " + type));
                 }
-                return repo.create(dictType)
-                    .compose(created -> audit.log(
-                            AuditAction.AUDIT_CREATE, "sys_dict_type",
-                            String.valueOf(created.getLong("dictId")),
-                            null, created)
-                        .map(created));
+                return doCreate(dictType).map(SysDictType::toJson);
             });
     }
 
     @Override
-    public Future<JsonObject> update(Long id, JsonObject dictType) {
+    public Future<JsonObject> update(Long id, SysDictType dictType) {
         if (!dbAvailable) {
-            return Future.succeededFuture(dictType.copy().put("dictId", id));
+            return Future.succeededFuture(dictType.toJson().put("dictId", id));
         }
         return repo.findById(id)
-            .compose(existing -> {
+            .compose((SysDictType existing) -> {
                 if (existing == null) {
                     return Future.<JsonObject>failedFuture(BusinessException.notFound("DictType"));
                 }
-                String newType = dictType.getString("dictType");
-                if (newType != null && !newType.equals(existing.getString("dict_type"))) {
+                String newType = dictType.getDictType();
+                if (newType != null && !newType.equals(existing.getDictType())) {
                     return repo.existsByDictType(newType)
                         .compose(conflict -> {
                             if (conflict) {
                                 return Future.<JsonObject>failedFuture(
                                     BusinessException.conflict("Dict type already exists: " + newType));
                             }
-                            return repo.update(id, dictType)
-                                .compose(updated -> audit.log(
-                                        AuditAction.AUDIT_UPDATE, "sys_dict_type",
-                                        String.valueOf(id),
-                                        existing, updated)
-                                    .map(updated));
+                            return doUpdate(id, dictType, existing).map(SysDictType::toJson);
                         });
                 }
-                return repo.update(id, dictType)
-                    .compose(updated -> audit.log(
-                            AuditAction.AUDIT_UPDATE, "sys_dict_type",
-                            String.valueOf(id),
-                            existing, updated)
-                        .map(updated));
+                return doUpdate(id, dictType, existing).map(SysDictType::toJson);
             });
     }
 
@@ -130,7 +148,7 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
                     .compose(v -> audit.log(
                             AuditAction.AUDIT_DELETE, "sys_dict_type",
                             String.valueOf(id),
-                            existing, null)
+                            existing.toJson(), null)
                         .mapEmpty());
             });
     }
@@ -148,7 +166,7 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
         }
         return repo.count()
             .compose(total -> repo.findPaginated(page, size)
-                .map(list -> new PageResult<>(list, total, page, size)));
+                .map(list -> new PageResult<>(toJsonObjectList(list), total, page, size)));
     }
 
     @Override
@@ -158,7 +176,7 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
         }
         return repo.searchCount(dictName, dictType, status)
             .compose(total -> repo.searchPaginated(dictName, dictType, status, page, size)
-                .map(list -> new PageResult<>(list, total, page, size)));
+                .map(list -> new PageResult<>(toJsonObjectList(list), total, page, size)));
     }
 
     @Override

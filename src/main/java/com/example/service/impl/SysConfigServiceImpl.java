@@ -5,22 +5,20 @@ import com.example.core.PageResult;
 import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
 import com.example.db.DatabaseVerticle;
+import com.example.entity.SysConfig;
 import com.example.repository.SysConfigRepository;
 import com.example.service.SysConfigService;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * System Config Service Implementation
  */
 public class SysConfigServiceImpl implements SysConfigService {
-
-    private static final Logger LOG = LoggerFactory.getLogger(SysConfigServiceImpl.class);
 
     private final SysConfigRepository repo;
     private final AuditLogger audit;
@@ -32,38 +30,47 @@ public class SysConfigServiceImpl implements SysConfigService {
         this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
 
+    private JsonObject toJson(SysConfig c) { return c != null ? c.toJson() : null; }
+
+    private List<JsonObject> toJsonList(List<SysConfig> list) {
+        if (list == null) return List.of();
+        List<JsonObject> result = new ArrayList<>();
+        for (SysConfig c : list) { result.add(c.toJson()); }
+        return result;
+    }
+
     @Override
     public Future<List<JsonObject>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(List.of());
-        return repo.findAll();
+        return repo.findAll().map(this::toJsonList);
     }
 
     @Override
     public Future<JsonObject> findById(Long id) {
         if (!dbAvailable) return Future.succeededFuture(null);
         return repo.findById(id)
-            .map(config -> {
-                if (config == null) throw BusinessException.notFound("Config");
-                return config;
+            .map(c -> {
+                if (c == null) throw BusinessException.notFound("Config");
+                return c.toJson();
             });
     }
 
     @Override
     public Future<JsonObject> findByConfigKey(String configKey) {
         if (!dbAvailable) return Future.succeededFuture(null);
-        return repo.findByConfigKey(configKey);
+        return repo.findByConfigKey(configKey).map(this::toJson);
     }
 
     @Override
     public Future<String> getConfigValue(String configKey) {
-        return findByConfigKey(configKey)
-            .map(config -> config != null ? config.getString("config_value") : null);
+        if (!dbAvailable) return Future.succeededFuture(null);
+        return repo.findByConfigKey(configKey)
+            .map(c -> c != null ? c.getConfigValue() : null);
     }
 
     @Override
     public Future<String> getConfigValue(String configKey, String defaultValue) {
-        return getConfigValue(configKey)
-            .map(value -> value != null ? value : defaultValue);
+        return getConfigValue(configKey).map(v -> v != null ? v : defaultValue);
     }
 
     @Override
@@ -80,18 +87,20 @@ public class SysConfigServiceImpl implements SysConfigService {
             return Future.succeededFuture(config.copy().put("configId", System.currentTimeMillis()));
         }
 
+        SysConfig entity = SysConfig.fromJson(config);
+
         return repo.existsByConfigKey(configKey)
             .compose(exists -> {
                 if (exists) {
                     return Future.<JsonObject>failedFuture(
                         BusinessException.conflict("Config key already exists: " + configKey));
                 }
-                return repo.create(config)
+                return repo.create(entity)
                     .compose(created -> audit.log(
                             AuditAction.AUDIT_CREATE, "sys_config",
-                            String.valueOf(created.getLong("configId")),
-                            null, created)
-                        .map(created));
+                            String.valueOf(created.getConfigId()),
+                            null, created.toJson())
+                        .map(created.toJson()));
             });
     }
 
@@ -100,33 +109,35 @@ public class SysConfigServiceImpl implements SysConfigService {
         if (!dbAvailable) {
             return Future.succeededFuture(config.copy().put("configId", id));
         }
+        SysConfig entity = SysConfig.fromJson(config);
+
         return repo.findById(id)
             .compose(existing -> {
                 if (existing == null) {
                     return Future.<JsonObject>failedFuture(BusinessException.notFound("Config"));
                 }
-                String newKey = config.getString("configKey");
-                if (newKey != null && !newKey.equals(existing.getString("config_key"))) {
+                String newKey = entity.getConfigKey();
+                if (newKey != null && !newKey.equals(existing.getConfigKey())) {
                     return repo.existsByConfigKey(newKey)
                         .compose(conflict -> {
                             if (conflict) {
                                 return Future.<JsonObject>failedFuture(
                                     BusinessException.conflict("Config key already exists: " + newKey));
                             }
-                            return repo.update(id, config)
+                            return repo.update(id, entity)
                                 .compose(updated -> audit.log(
                                         AuditAction.AUDIT_UPDATE, "sys_config",
                                         String.valueOf(id),
-                                        existing, updated)
-                                    .map(updated));
+                                        existing.toJson(), updated.toJson())
+                                    .map(updated.toJson()));
                         });
                 }
-                return repo.update(id, config)
+                return repo.update(id, entity)
                     .compose(updated -> audit.log(
                             AuditAction.AUDIT_UPDATE, "sys_config",
                             String.valueOf(id),
-                            existing, updated)
-                        .map(updated));
+                            existing.toJson(), updated.toJson())
+                        .map(updated.toJson()));
             });
     }
 
@@ -142,7 +153,7 @@ public class SysConfigServiceImpl implements SysConfigService {
                     .compose(v -> audit.log(
                             AuditAction.AUDIT_DELETE, "sys_config",
                             String.valueOf(id),
-                            existing, null)
+                            existing.toJson(), null)
                         .mapEmpty());
             });
     }
@@ -160,7 +171,7 @@ public class SysConfigServiceImpl implements SysConfigService {
         }
         return repo.count()
             .compose(total -> repo.findPaginated(page, size)
-                .map(list -> new PageResult<>(list, total, page, size)));
+                .map(list -> new PageResult<>(toJsonList(list), total, page, size)));
     }
 
     @Override
@@ -170,7 +181,7 @@ public class SysConfigServiceImpl implements SysConfigService {
         }
         return repo.searchCount(configName, configKey, null, group)
             .compose(total -> repo.searchPaginated(configName, configKey, null, group, page, size)
-                .map(list -> new PageResult<>(list, total, page, size)));
+                .map(list -> new PageResult<>(toJsonList(list), total, page, size)));
     }
 
     @Override

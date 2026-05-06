@@ -1,13 +1,17 @@
 package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
+import com.example.entity.SysConfig;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.Tuple;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * SysConfig Repository - Database operations for sys_config table
@@ -21,176 +25,153 @@ public class SysConfigRepository {
     }
 
     // ================================================================
+    // Row → Entity converters
+    // ================================================================
+
+    private SysConfig toConfig(Row row) {
+        return SysConfig.fromRow(row);
+    }
+
+    private List<SysConfig> toConfigList(RowSet<Row> rows) {
+        List<SysConfig> list = new ArrayList<>();
+        for (Row row : rows) {
+            list.add(toConfig(row));
+        }
+        return list;
+    }
+
+    // ================================================================
     // QUERY OPERATIONS
     // ================================================================
 
-    /**
-     * Find all configurations
-     */
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<SysConfig>> findAll() {
         String sql = "SELECT * FROM sys_config ORDER BY config_id";
         return DatabaseVerticle.query(vertx, sql)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toConfigList);
     }
 
-    /**
-     * Find config by ID
-     */
-    public Future<JsonObject> findById(Long configId) {
+    public Future<SysConfig> findById(Long configId) {
         String sql = "SELECT * FROM sys_config WHERE config_id = $1";
         Tuple params = Tuple.tuple().addLong(configId);
         return DatabaseVerticle.query(vertx, sql, params)
             .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
+                List<SysConfig> list = toConfigList(rows);
                 return list.isEmpty() ? null : list.get(0);
             });
     }
 
-    /**
-     * Find configs by config_name (supports fuzzy search)
-     */
-    public Future<List<JsonObject>> findByConfigName(String configName) {
+    public Future<List<SysConfig>> findByConfigName(String configName) {
         if (configName == null || configName.isEmpty()) {
             return findAll();
         }
         String sql = "SELECT * FROM sys_config WHERE config_name LIKE $1 ORDER BY config_id";
         Tuple params = Tuple.tuple().addString("%" + configName + "%");
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toConfigList);
     }
 
-    /**
-     * Find configs by config_value (supports fuzzy search)
-     */
-    public Future<List<JsonObject>> findByConfigValue(String configValue) {
+    public Future<List<SysConfig>> findByConfigValue(String configValue) {
         if (configValue == null || configValue.isEmpty()) {
             return findAll();
         }
         String sql = "SELECT * FROM sys_config WHERE config_value LIKE $1 ORDER BY config_id";
         Tuple params = Tuple.tuple().addString("%" + configValue + "%");
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toConfigList);
     }
 
-    /**
-     * Find config by config_key (exact match)
-     */
-    public Future<JsonObject> findByConfigKey(String configKey) {
+    public Future<SysConfig> findByConfigKey(String configKey) {
         String sql = "SELECT * FROM sys_config WHERE config_key = $1";
         Tuple params = Tuple.tuple().addString(configKey);
         return DatabaseVerticle.query(vertx, sql, params)
             .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
+                List<SysConfig> list = toConfigList(rows);
                 return list.isEmpty() ? null : list.get(0);
             });
     }
 
-    /**
-     * Find configs by config_type
-     */
-    public Future<List<JsonObject>> findByConfigType(String configType) {
+    public Future<List<SysConfig>> findByConfigType(String configType) {
         if (configType == null || configType.isEmpty()) {
             return findAll();
         }
         String sql = "SELECT * FROM sys_config WHERE config_type = $1 ORDER BY config_id";
         Tuple params = Tuple.tuple().addString(configType);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toConfigList);
     }
 
-    /**
-     * Advanced search with multiple filters
-     */
-    public Future<List<JsonObject>> search(String configName, String configKey, 
-                                     String configValue, String configType) {
+    public Future<List<SysConfig>> search(String configName, String configKey,
+                                           String configValue, String configType) {
         StringBuilder sql = new StringBuilder("SELECT * FROM sys_config WHERE 1=1");
         Tuple params = Tuple.tuple();
-        int paramIndex = 1;
+        int idx = 1;
 
         if (configName != null && !configName.isEmpty()) {
-            sql.append(" AND config_name LIKE $").append(paramIndex++);
+            sql.append(" AND config_name LIKE $").append(idx++);
             params.addString("%" + configName + "%");
         }
         if (configKey != null && !configKey.isEmpty()) {
-            sql.append(" AND config_key = $").append(paramIndex++);
+            sql.append(" AND config_key = $").append(idx++);
             params.addString(configKey);
         }
         if (configValue != null && !configValue.isEmpty()) {
-            sql.append(" AND config_value LIKE $").append(paramIndex++);
+            sql.append(" AND config_value LIKE $").append(idx++);
             params.addString("%" + configValue + "%");
         }
         if (configType != null && !configType.isEmpty()) {
-            sql.append(" AND config_type = $").append(paramIndex++);
+            sql.append(" AND config_type = $").append(idx++);
             params.addString(configType);
         }
         sql.append(" ORDER BY config_id");
 
         return DatabaseVerticle.query(vertx, sql.toString(), params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toConfigList);
     }
 
-    /**
-     * Count all configs
-     */
     public Future<Long> count() {
-        String sql = "SELECT COUNT(*) as count FROM sys_config";
+        String sql = "SELECT COUNT(*) as cnt FROM sys_config";
         return DatabaseVerticle.query(vertx, sql)
-            .map(rows -> {
-                Row row = rows.iterator().next();
-                return row.getLong("count");
-            });
+            .map(rows -> rows.iterator().next().getLong("cnt"));
     }
 
-    /**
-     * Count configs by config_name
-     */
     public Future<Long> countByConfigName(String configName) {
-        String sql = "SELECT COUNT(*) as count FROM sys_config WHERE config_name LIKE $1";
+        String sql = "SELECT COUNT(*) as cnt FROM sys_config WHERE config_name LIKE $1";
         Tuple params = Tuple.tuple().addString("%" + configName + "%");
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> rows.iterator().next().getLong("count"));
+            .map(rows -> rows.iterator().next().getLong("cnt"));
     }
 
-    /**
-     * Check if config_key exists
-     */
     public Future<Boolean> existsByConfigKey(String configKey) {
-        String sql = "SELECT COUNT(*) as count FROM sys_config WHERE config_key = $1";
+        String sql = "SELECT COUNT(*) as cnt FROM sys_config WHERE config_key = $1";
         Tuple params = Tuple.tuple().addString(configKey);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> rows.iterator().next().getLong("count") > 0);
+            .map(rows -> rows.iterator().next().getLong("cnt") > 0);
     }
 
     // ================================================================
     // MUTATION OPERATIONS
     // ================================================================
 
-    /**
-     * Create a new config
-     */
-    public Future<JsonObject> create(JsonObject config) {
+    public Future<SysConfig> create(SysConfig config) {
         String sql = """
             INSERT INTO sys_config (config_key, config_name, config_value, config_type, description)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING *
             """;
         Tuple params = Tuple.tuple()
-            .addString(config.getString("configKey"))
-            .addString(config.getString("configName"))
-            .addString(config.getString("configValue"))
-            .addString(config.getString("configType", "Y"))
-            .addString(config.getString("description"));
+            .addString(config.getConfigKey())
+            .addString(config.getConfigName())
+            .addString(config.getConfigValue())
+            .addString(config.getConfigType())
+            .addString(config.getDescription());
         return DatabaseVerticle.query(vertx, sql, params)
             .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
+                List<SysConfig> list = toConfigList(rows);
                 return list.isEmpty() ? null : list.get(0);
             });
     }
 
-    /**
-     * Update an existing config
-     */
-    public Future<JsonObject> update(Long configId, JsonObject config) {
+    public Future<SysConfig> update(Long configId, SysConfig config) {
         String sql = """
             UPDATE sys_config
             SET config_key = COALESCE($2, config_key),
@@ -198,27 +179,24 @@ public class SysConfigRepository {
                 config_value = COALESCE($4, config_value),
                 config_type = COALESCE($5, config_type),
                 description = COALESCE($6, description),
-                updated_at = CURRENT_TIMESTAMP
+                update_time = CURRENT_TIMESTAMP
             WHERE config_id = $1
             RETURNING *
             """;
         Tuple params = Tuple.tuple()
             .addLong(configId)
-            .addString(config.getString("configKey"))
-            .addString(config.getString("configName"))
-            .addString(config.getString("configValue"))
-            .addString(config.getString("configType"))
-            .addString(config.getString("description"));
+            .addString(config.getConfigKey())
+            .addString(config.getConfigName())
+            .addString(config.getConfigValue())
+            .addString(config.getConfigType())
+            .addString(config.getDescription());
         return DatabaseVerticle.query(vertx, sql, params)
             .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
+                List<SysConfig> list = toConfigList(rows);
                 return list.isEmpty() ? null : list.get(0);
             });
     }
 
-    /**
-     * Delete a config by ID
-     */
     public Future<Void> delete(Long configId) {
         String sql = "DELETE FROM sys_config WHERE config_id = $1";
         Tuple params = Tuple.tuple().addLong(configId);
@@ -230,78 +208,69 @@ public class SysConfigRepository {
     // PAGINATION
     // ================================================================
 
-    /**
-     * Find with pagination
-     */
-    public Future<List<JsonObject>> findPaginated(int page, int size) {
+    public Future<List<SysConfig>> findPaginated(int page, int size) {
         int offset = (page - 1) * size;
         String sql = "SELECT * FROM sys_config ORDER BY config_id LIMIT $1 OFFSET $2";
         Tuple params = Tuple.tuple().addInteger(size).addInteger(offset);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toConfigList);
     }
 
-    /**
-     * Advanced search with pagination
-     */
-    public Future<List<JsonObject>> searchPaginated(String configName, String configKey,
+    public Future<List<SysConfig>> searchPaginated(String configName, String configKey,
                                               String configValue, String configType,
                                               int page, int size) {
         int offset = (page - 1) * size;
         StringBuilder sql = new StringBuilder("SELECT * FROM sys_config WHERE 1=1");
         Tuple params = Tuple.tuple();
-        int paramIndex = 1;
+        int idx = 1;
 
         if (configName != null && !configName.isEmpty()) {
-            sql.append(" AND config_name LIKE $").append(paramIndex++);
+            sql.append(" AND config_name LIKE $").append(idx++);
             params.addString("%" + configName + "%");
         }
         if (configKey != null && !configKey.isEmpty()) {
-            sql.append(" AND config_key = $").append(paramIndex++);
+            sql.append(" AND config_key = $").append(idx++);
             params.addString(configKey);
         }
         if (configValue != null && !configValue.isEmpty()) {
-            sql.append(" AND config_value LIKE $").append(paramIndex++);
+            sql.append(" AND config_value LIKE $").append(idx++);
             params.addString("%" + configValue + "%");
         }
         if (configType != null && !configType.isEmpty()) {
-            sql.append(" AND config_type = $").append(paramIndex++);
+            sql.append(" AND config_type = $").append(idx++);
             params.addString(configType);
         }
-        sql.append(" ORDER BY config_id LIMIT $").append(paramIndex++).append(" OFFSET $").append(paramIndex);
+        sql.append(" ORDER BY config_id LIMIT $").append(idx++).append(" OFFSET $").append(idx);
         params.addInteger(size).addInteger(offset);
 
         return DatabaseVerticle.query(vertx, sql.toString(), params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(this::toConfigList);
     }
 
-    /**
-     * Count search results (for pagination total)
-     */
     public Future<Long> searchCount(String configName, String configKey,
                                     String configValue, String configType) {
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*) as count FROM sys_config WHERE 1=1");
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) as cnt FROM sys_config WHERE 1=1");
         Tuple params = Tuple.tuple();
-        int paramIndex = 1;
+        int idx = 1;
 
         if (configName != null && !configName.isEmpty()) {
-            sql.append(" AND config_name LIKE $").append(paramIndex++);
+            sql.append(" AND config_name LIKE $").append(idx++);
             params.addString("%" + configName + "%");
         }
         if (configKey != null && !configKey.isEmpty()) {
-            sql.append(" AND config_key = $").append(paramIndex++);
+            sql.append(" AND config_key = $").append(idx++);
             params.addString(configKey);
         }
         if (configValue != null && !configValue.isEmpty()) {
-            sql.append(" AND config_value LIKE $").append(paramIndex++);
+            sql.append(" AND config_value LIKE $").append(idx++);
             params.addString("%" + configValue + "%");
         }
         if (configType != null && !configType.isEmpty()) {
-            sql.append(" AND config_type = $").append(paramIndex++);
+            sql.append(" AND config_type = $").append(idx++);
             params.addString(configType);
         }
 
         return DatabaseVerticle.query(vertx, sql.toString(), params)
-            .map(rows -> rows.iterator().next().getLong("count"));
+            .map(rows -> rows.iterator().next().getLong("cnt"));
     }
 }
