@@ -6,6 +6,7 @@ import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
 import com.example.repository.ProductRepository;
 import com.example.service.ProductService;
+import com.example.entity.Product;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -13,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * Product Service Implementation - with PostgreSQL
@@ -46,7 +48,7 @@ public class ProductServiceImpl implements ProductService {
     @Override
     public Future<List<JsonObject>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(getDemoProducts());
-        return productRepository.findAll();
+        return productRepository.findAll().map(products -> { List<JsonObject> result = new java.util.ArrayList<>(); for (Product p : products) { if (p != null) result.add(p.toJson()); } return result; });
     }
 
     @Override
@@ -61,7 +63,7 @@ public class ProductServiceImpl implements ProductService {
                 if (product == null) {
                     throw BusinessException.notFound("Product");
                 }
-                return product;
+                return product != null ? product.toJson() : null;
             });
     }
 
@@ -84,25 +86,25 @@ public class ProductServiceImpl implements ProductService {
             }
             return Future.succeededFuture(products);
         }
-        return productRepository.search(keyword, category);
+        return productRepository.search(keyword, category).map(products -> { List<JsonObject> result = new java.util.ArrayList<>(); for (Product p : products) { if (p != null) result.add(p.toJson()); } return result; });
     }
 
     @Override
-    public Future<JsonObject> create(JsonObject product) {
+    public Future<JsonObject> create(Product product) {
         if (product == null) {
             return Future.failedFuture(BusinessException.badRequest("Request body is required"));
         }
-        String name = product.getString("name");
+        String name = product.getName();
         if (name == null || name.trim().isEmpty()) {
             return Future.failedFuture(BusinessException.badRequest("Product name is required"));
         }
-        Double price = product.getDouble("price");
-        if (price == null || price <= 0) {
+        java.math.BigDecimal price = product.getPrice();
+        if (price == null || price.doubleValue() <= 0) {
             return Future.failedFuture(BusinessException.badRequest("Valid price is required"));
         }
 
         if (!dbAvailable) {
-            JsonObject newProduct = product.copy();
+            JsonObject newProduct = product.toJson();
             newProduct.put("id", System.currentTimeMillis());
             return Future.succeededFuture(newProduct);
         }
@@ -114,18 +116,19 @@ public class ProductServiceImpl implements ProductService {
                         BusinessException.conflict("Product name already exists"));
                 }
                 return productRepository.create(product)
-                    .compose(created -> audit.log(
-                            AuditAction.AUDIT_CREATE, "products",
-                            String.valueOf(created.getLong("id")),
-                            null, created)
-                        .map(created));
+                    .map(created -> {
+                        audit.log(AuditAction.AUDIT_CREATE, "products",
+                            String.valueOf(created.getId()),
+                            null, created.toJson());
+                        return created.toJson();
+                    });
             });
     }
 
     @Override
-    public Future<JsonObject> update(Long id, JsonObject product) {
+    public Future<JsonObject> update(Long id, Product product) {
         if (!dbAvailable) {
-            return Future.succeededFuture(product.copy().put("id", id));
+            return Future.succeededFuture(product.toJson().put("id", id));
         }
         return productRepository.findById(id)
             .compose(existing -> {
@@ -133,11 +136,14 @@ public class ProductServiceImpl implements ProductService {
                     return Future.<JsonObject>failedFuture(BusinessException.notFound("Product"));
                 }
                 return productRepository.update(id, product)
-                    .compose(updated -> audit.log(
-                            AuditAction.AUDIT_UPDATE, "products",
-                            String.valueOf(id),
-                            existing, updated)
-                        .map(updated));
+                    .map(updated -> {
+                        if (updated != null) {
+                            audit.log(AuditAction.AUDIT_UPDATE, "products",
+                                String.valueOf(id),
+                                existing != null ? existing.toJson() : null, updated.toJson());
+                        }
+                        return updated != null ? updated.toJson() : null;
+                    });
             })
             .map(updated -> {
                 if (updated == null) {
@@ -161,7 +167,7 @@ public class ProductServiceImpl implements ProductService {
                     .compose(v -> audit.log(
                             AuditAction.AUDIT_DELETE, "products",
                             String.valueOf(id),
-                            existing, null)
+                            existing != null ? existing.toJson() : null, null)
                         .mapEmpty());
             });
     }
@@ -173,7 +179,7 @@ public class ProductServiceImpl implements ProductService {
     private static final int MAX_BATCH_SIZE = 100;
 
     @Override
-    public Future<JsonObject> batchCreate(List<JsonObject> products) {
+    public Future<JsonObject> batchCreate(List<Product> products) {
         if (products == null || products.isEmpty()) {
             return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
         }
@@ -182,20 +188,19 @@ public class ProductServiceImpl implements ProductService {
         }
         // Validate each product
         for (int i = 0; i < products.size(); i++) {
-            JsonObject p = products.get(i);
-            if (p.getString("name") == null || p.getString("name").trim().isEmpty()) {
+            Product p = products.get(i);
+            if (p.getName() == null || p.getName().trim().isEmpty()) {
                 return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: name is required"));
             }
-            if (p.getDouble("price") == null || p.getDouble("price") <= 0) {
+            if (p.getPrice() == null || p.getPrice().doubleValue() <= 0) {
                 return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: valid price is required"));
             }
         }
         if (!dbAvailable) {
-            // Demo mode: return simulated results
             List<JsonObject> created = products.stream().map(p -> {
-                JsonObject copy = p.copy();
-                copy.put("id", System.currentTimeMillis() + products.indexOf(p));
-                return copy;
+                JsonObject json = p.toJson();
+                json.put("id", System.currentTimeMillis() + products.indexOf(p));
+                return json;
             }).toList();
             return Future.succeededFuture(new JsonObject()
                 .put("created", created.size()).put("failed", 0)
@@ -204,11 +209,11 @@ public class ProductServiceImpl implements ProductService {
         return productRepository.createBatch(products)
             .map(created -> new JsonObject()
                 .put("created", created.size()).put("failed", 0)
-                .put("items", created));
+                .put("items", created.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList())));
     }
 
     @Override
-    public Future<JsonObject> batchUpdate(List<JsonObject> products) {
+    public Future<JsonObject> batchUpdate(List<Product> products) {
         if (products == null || products.isEmpty()) {
             return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
         }
@@ -217,24 +222,24 @@ public class ProductServiceImpl implements ProductService {
         }
         // Validate each item has id
         for (int i = 0; i < products.size(); i++) {
-            if (products.get(i).getLong("id") == null) {
+            if (products.get(i).getId() == null) {
                 return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: id is required"));
             }
         }
         if (!dbAvailable) {
             return Future.succeededFuture(new JsonObject()
                 .put("updated", products.size()).put("failed", 0)
-                .put("items", products));
+                .put("items", products.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList())));
         }
         // Sequential update (each returns updated row)
         List<JsonObject> updated = new java.util.ArrayList<>();
         int[] failed = {0};
         List<JsonObject> failedItems = new java.util.ArrayList<>();
         Future<JsonObject> result = Future.succeededFuture();
-        for (JsonObject p : products) {
-            result = result.compose(v -> productRepository.update(p.getLong("id"), p)
-                .onSuccess(row -> updated.add(row))
-                .onFailure(err -> { failed[0]++; failedItems.add(p); })
+        for (Product p : products) {
+            result = result.compose(v -> productRepository.update(p.getId(), p)
+                .onSuccess(row -> { if (row != null) updated.add(row.toJson()); })
+                .onFailure(err -> { failed[0]++; failedItems.add(p.toJson()); })
                 .mapEmpty());
         }
         return result.map(v -> new JsonObject()
@@ -276,7 +281,10 @@ public class ProductServiceImpl implements ProductService {
         
         return productRepository.count()
             .compose(total -> productRepository.findPaginated(page, size)
-                .map(list -> new PageResult<>(list, total, page, size)));
+                .map(list -> {
+                    List<JsonObject> jsonList = list.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList());
+                    return new PageResult<>(jsonList, total, page, size);
+                }));
     }
 
     @Override
@@ -304,7 +312,10 @@ public class ProductServiceImpl implements ProductService {
 
         return productRepository.searchCount(keyword, category)
             .compose(total -> productRepository.searchPaginated(keyword, category, page, size)
-                .map(list -> new PageResult<>(list, total, page, size)));
+                .map(list -> {
+                    List<JsonObject> jsonList = list.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList());
+                    return new PageResult<>(jsonList, total, page, size);
+                }));
     }
 
     // ================================================================
@@ -317,7 +328,13 @@ public class ProductServiceImpl implements ProductService {
                 .filter(p -> category.equalsIgnoreCase(p.getString("category", "")))
                 .toList());
         }
-        return productRepository.findByCategory(category);
+        return productRepository.findByCategory(category).map(products -> {
+            List<JsonObject> result = new java.util.ArrayList<>();
+            for (Product p : products) {
+                if (p != null) result.add(p.toJson());
+            }
+            return result;
+        });
     }
 
     // ================================================================

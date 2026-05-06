@@ -8,6 +8,7 @@ import com.example.repository.PaymentRepository;
 import com.example.repository.ProductRepository;
 import com.example.repository.UserRepository;
 import com.example.service.PaymentService;
+import com.example.entity.Product;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -238,7 +239,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         return productRepo.findByIdForUpdate(productId)
             .compose(product -> {
-                int stockAfter = product.getInteger("stock", 0);
+                int stockAfter = product.getStock() != null ? product.getStock() : 0;
                 return invTxRepo.recordRestoration(productId, orderId,
                     0, stockAfter, stockAfter,
                     "Payment confirmed for order " + orderId +

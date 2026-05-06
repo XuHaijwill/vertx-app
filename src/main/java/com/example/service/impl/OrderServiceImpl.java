@@ -12,6 +12,7 @@ import com.example.repository.OrderRepository;
 import com.example.repository.ProductRepository;
 import com.example.repository.UserRepository;
 import com.example.service.OrderService;
+import com.example.entity.Product;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -199,7 +200,7 @@ public class OrderServiceImpl implements OrderService {
 
         return productRepo.findByIdForUpdate(productId)
             .compose(product -> {
-                int before = product.getInteger("stock", 0);
+                int before = product.getStock() != null ? product.getStock() : 0;
                 return productRepo.deductStock(productId, quantity, orderId)
                     .compose(after -> invTxRepo.recordDeduction(productId, orderId,
                         -quantity, before, after,
@@ -217,7 +218,7 @@ public class OrderServiceImpl implements OrderService {
 
         return productRepo.findByIdForUpdate(productId)
             .compose(product -> {
-                int before = product.getInteger("stock", 0);
+                int before = product.getStock() != null ? product.getStock() : 0;
                 return productRepo.restoreStock(productId, quantity, orderId)
                     .compose(after -> invTxRepo.recordRestoration(productId, orderId,
                         quantity, before, after,

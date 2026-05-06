@@ -8,6 +8,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Tuple;
 
+import com.example.entity.Product;
 import java.util.List;
 
 /**
@@ -21,6 +22,34 @@ public class ProductRepository {
 
     private final Vertx vertx;
 
+    // ===== Entity Mapping =====
+    private Product toProduct(JsonObject json) {
+        if (json == null) return null;
+        Product p = new Product();
+        p.setId((Long) json.getValue("id"));
+        p.setName(json.getString("name"));
+        p.setCategory(json.getString("category"));
+        Object priceObj = json.getValue("price");
+        p.setPrice(priceObj != null ? new java.math.BigDecimal(priceObj.toString()) : null);
+        p.setStock((Integer) json.getValue("stock"));
+        p.setDescription(json.getString("description"));
+        p.setStatus(json.getString("status"));
+        Object createdObj = json.getValue("created_at");
+        if (createdObj != null) {
+            p.setCreatedAt(createdObj instanceof java.time.LocalDateTime ? (java.time.LocalDateTime) createdObj : java.time.LocalDateTime.parse(createdObj.toString()));
+        }
+        Object updatedObj = json.getValue("updated_at");
+        if (updatedObj != null) {
+            p.setUpdatedAt(updatedObj instanceof java.time.LocalDateTime ? (java.time.LocalDateTime) updatedObj : java.time.LocalDateTime.parse(updatedObj.toString()));
+        }
+        return p;
+    }
+
+    private List<Product> toProductList(List<JsonObject> jsonList) {
+        if (jsonList == null) return null;
+        return jsonList.stream().map(json -> toProduct((JsonObject)json)).collect(java.util.stream.Collectors.toList());
+    }
+
     public ProductRepository(Vertx vertx) {
         this.vertx = vertx;
     }
@@ -29,31 +58,28 @@ public class ProductRepository {
     // Pool-based queries (standalone — no transaction)
     // ================================================================
 
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<Product>> findAll() {
         return DatabaseVerticle.query(vertx, "SELECT * FROM products ORDER BY id")
-            .map(DatabaseVerticle::toJsonList);
+            .map(rows -> toProductList(DatabaseVerticle.toJsonList(rows)));
     }
 
-    public Future<JsonObject> findById(Long id) {
+    public Future<Product> findById(Long id) {
         String sql = "SELECT * FROM products WHERE id = $1";
         Tuple params = Tuple.tuple().addLong(id);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+            .map(rows -> { List<JsonObject> list = DatabaseVerticle.toJsonList(rows); return list.isEmpty() ? null : toProduct(list.get(0)); });
     }
 
-    public Future<List<JsonObject>> findByCategory(String category) {
+    public Future<List<Product>> findByCategory(String category) {
         String sql = "SELECT * FROM products WHERE LOWER(category) = LOWER($1) ORDER BY id";
         Tuple params = Tuple.tuple().addString(category);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params).map(rows -> toProductList(DatabaseVerticle.toJsonList(rows)));
     }
 
-    public Future<List<JsonObject>> findByStatus(String status) {
+    public Future<List<Product>> findByStatus(String status) {
         String sql = "SELECT * FROM products WHERE status = $1 ORDER BY id";
         Tuple params = Tuple.tuple().addString(status);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params).map(rows -> toProductList(DatabaseVerticle.toJsonList(rows)));
     }
 
     public Future<Long> count() {
@@ -61,46 +87,43 @@ public class ProductRepository {
             .map(rows -> rows.iterator().next().getLong("count"));
     }
 
-    public Future<List<JsonObject>> findPaginated(int page, int size) {
+    public Future<List<Product>> findPaginated(int page, int size) {
         int offset = (page - 1) * size;
         String sql = "SELECT * FROM products ORDER BY id LIMIT $1 OFFSET $2";
         Tuple params = Tuple.tuple().addInteger(size).addInteger(offset);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params).map(rows -> toProductList(DatabaseVerticle.toJsonList(rows)));
     }
 
-    public Future<JsonObject> create(JsonObject product) {
+    public Future<Product> create(Product product) {
         String sql = "INSERT INTO products (name, category, price, stock, description, status) " +
             "VALUES ($1, $2, $3, $4, $5, $6) RETURNING *";
         Tuple params = Tuple.tuple()
-            .addString(product.getString("name"))
-            .addString(product.getString("category"))
-            .addBigDecimal(java.math.BigDecimal.valueOf(product.getDouble("price")))
-            .addInteger(product.getInteger("stock", 0))
-            .addString(product.getString("description"))
-            .addString(product.getString("status", "active"));
+            .addString(product.getName())
+            .addString(product.getCategory())
+            .addBigDecimal(product.getPrice())
+            .addInteger(product.getStock() != null ? product.getStock() : 0)
+            .addString(product.getDescription())
+            .addString(product.getStatus() != null ? product.getStatus() : "active");
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> DatabaseVerticle.toJson(rows.iterator().next()));
+            .map(rows -> toProduct(DatabaseVerticle.toJson(rows.iterator().next())));
     }
 
-    public Future<JsonObject> update(Long id, JsonObject product) {
+    public Future<Product> update(Long id, Product product) {
         String sql = "UPDATE products SET " +
             "name = COALESCE($1, name), category = COALESCE($2, category), " +
             "price = COALESCE($3, price), stock = COALESCE($4, stock), " +
             "description = COALESCE($5, description), status = COALESCE($6, status), " +
             "updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *";
         Tuple params = Tuple.tuple()
-            .addString(product.getString("name"))
-            .addString(product.getString("category"))
-            .addBigDecimal(java.math.BigDecimal.valueOf(product.getDouble("price")))
-            .addInteger(product.getInteger("stock"))
-            .addString(product.getString("description"))
-            .addString(product.getString("status"))
+            .addString(product.getName())
+            .addString(product.getCategory())
+            .addBigDecimal(product.getPrice())
+            .addInteger(product.getStock())
+            .addString(product.getDescription())
+            .addString(product.getStatus())
             .addLong(id);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+            .map(rows -> { List<JsonObject> list = DatabaseVerticle.toJsonList(rows); return list.isEmpty() ? null : toProduct(list.get(0)); });
     }
 
     public Future<Boolean> delete(Long id) {
@@ -118,41 +141,41 @@ public class ProductRepository {
         return DatabaseVerticle.query(vertx, sql, params).map(rows -> rows.rowCount());
     }
 
-    public Future<List<JsonObject>> createBatch(List<JsonObject> products) {
+    public Future<List<Product>> createBatch(List<Product> products) {
         if (products == null || products.isEmpty()) return Future.succeededFuture(List.of());
         List<String> columns = List.of("name", "category", "price", "stock", "description", "status");
         List<List<Object>> values = products.stream().map(p -> List.<Object>of(
-            p.getString("name"),
-            p.getString("category"),
-            java.math.BigDecimal.valueOf(p.getDouble("price", 0.0)),
-            p.getInteger("stock", 0),
-            p.getString("description"),
-            p.getString("status", "active")
+            p.getName(),
+            p.getCategory(),
+            p.getPrice() != null ? p.getPrice() : java.math.BigDecimal.ZERO,
+            p.getStock() != null ? p.getStock() : 0,
+            p.getDescription(),
+            p.getStatus() != null ? p.getStatus() : "active"
         )).collect(java.util.stream.Collectors.toList());
         return com.example.db.BatchOperations.multiRowInsert(vertx, "products", columns, values, "id")
             .compose(ids -> {
-                if (ids.isEmpty()) return Future.succeededFuture(List.<JsonObject>of());
+                if (ids.isEmpty()) return Future.succeededFuture(List.<Product>of());
                 // fetch inserted rows by IDs
                 String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
                 Tuple params = Tuple.tuple();
                 for (Long id : ids) params.addLong(id);
                 return DatabaseVerticle.query(vertx, "SELECT * FROM products WHERE id IN (" + placeholders + ") ORDER BY id", params)
-                    .map(DatabaseVerticle::toJsonList);
+                    .map(rows -> toProductList(DatabaseVerticle.toJsonList(rows)));
             });
     }
 
-    public Future<List<JsonObject>> search(String keyword, String category) {
+    public Future<List<Product>> search(String keyword, String category) {
         return search(keyword, category, 1, Integer.MAX_VALUE);
     }
 
     /**
      * Alias for search(keyword, category, page, size) — matches ProductServiceImpl expectations.
      */
-    public Future<List<JsonObject>> searchPaginated(String keyword, String category, int page, int size) {
+    public Future<List<Product>> searchPaginated(String keyword, String category, int page, int size) {
         return search(keyword, category, page, size);
     }
 
-    public Future<List<JsonObject>> search(String keyword, String category, int page, int size) {
+    public Future<List<Product>> search(String keyword, String category, int page, int size) {
         int offset = (page - 1) * size;
         StringBuilder sql = new StringBuilder("SELECT * FROM products WHERE 1=1");
         Tuple params = Tuple.tuple();
@@ -167,7 +190,7 @@ public class ProductRepository {
         }
         sql.append(" ORDER BY id LIMIT $").append(idx++).append(" OFFSET $").append(idx);
         params.addInteger(size).addInteger(offset);
-        return DatabaseVerticle.query(vertx, sql.toString(), params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql.toString(), params).map(rows -> toProductList(DatabaseVerticle.toJsonList(rows)));
     }
 
     public Future<Long> searchCount(String keyword, String category) {
@@ -220,7 +243,7 @@ public class ProductRepository {
      *
      * @see #findByIdForUpdate(TransactionContext, Long)
      */
-    public Future<JsonObject> findByIdForUpdate(Long productId) {
+    public Future<Product> findByIdForUpdate(Long productId) {
         TransactionContext tx = TxContextHolder.current();
         if (tx != null) return findByIdForUpdateInTx(tx, productId);
         // Rare path: called outside @Transactional — wrap in a quick transaction
@@ -278,7 +301,7 @@ public class ProductRepository {
      *     .compose(product -> { ... validate stock ...; return Future.succeededFuture(); });
      * </pre>
      */
-    private Future<JsonObject> findByIdForUpdateInTx(TransactionContext tx, Long productId) {
+    private Future<Product> findByIdForUpdateInTx(TransactionContext tx, Long productId) {
         tx.tick();
         String sql = "SELECT * FROM products WHERE id = $1 FOR UPDATE";
         Tuple params = Tuple.tuple().addLong(productId);
@@ -287,7 +310,7 @@ public class ProductRepository {
                 if (product == null) {
                     throw new RuntimeException("Product not found: " + productId);
                 }
-                return product;
+                return toProduct(product);
             });
     }
 

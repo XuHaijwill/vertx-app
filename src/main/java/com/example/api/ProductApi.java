@@ -2,6 +2,7 @@ package com.example.api;
 
 import com.example.service.ProductService;
 import com.example.service.impl.ProductServiceImpl;
+import com.example.entity.Product;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -58,7 +59,7 @@ public class ProductApi extends BaseApi {
     }
 
     private void create(RoutingContext ctx) {
-        respondCreated(ctx, productService.create(bodyJson(ctx)));
+        respondCreated(ctx, productService.create(Product.fromJson(bodyJson(ctx))));
     }
 
     private void update(RoutingContext ctx) {
@@ -67,7 +68,7 @@ public class ProductApi extends BaseApi {
             badRequest(ctx, "Invalid product ID");
             return;
         }
-        respond(ctx, productService.update(id, bodyJson(ctx)));
+        respond(ctx, productService.update(id, Product.fromJson(bodyJson(ctx))));
     }
 
     private void delete(RoutingContext ctx) {
@@ -89,9 +90,9 @@ public class ProductApi extends BaseApi {
             badRequest(ctx, "Request body must contain a non-empty 'items' array");
             return;
         }
-        List<JsonObject> products = new ArrayList<>();
+        List<Product> products = new ArrayList<>();
         for (int i = 0; i < body.size(); i++) {
-            products.add(body.getJsonObject(i));
+            products.add(Product.fromJson(body.getJsonObject(i)));
         }
         respond(ctx, productService.batchCreate(products));
     }
@@ -102,9 +103,9 @@ public class ProductApi extends BaseApi {
             badRequest(ctx, "Request body must contain a non-empty 'items' array");
             return;
         }
-        List<JsonObject> products = new ArrayList<>();
+        List<Product> products = new ArrayList<>();
         for (int i = 0; i < body.size(); i++) {
-            products.add(body.getJsonObject(i));
+            products.add(Product.fromJson(body.getJsonObject(i)));
         }
         respond(ctx, productService.batchUpdate(products));
     }
