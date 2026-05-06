@@ -1,5 +1,6 @@
 package com.example.api;
 
+import com.example.entity.SysMenu;
 import com.example.service.SysMenuService;
 import com.example.service.impl.SysMenuServiceImpl;
 import io.vertx.core.Vertx;
@@ -73,7 +74,7 @@ public class SysMenuApi extends BaseApi {
             badRequest(ctx, "Request body is required");
             return;
         }
-        respondCreated(ctx, service.create(body));
+        respondCreated(ctx, service.create(SysMenu.fromJson(body)));
     }
 
     private void updateMenu(RoutingContext ctx) {
@@ -87,7 +88,7 @@ public class SysMenuApi extends BaseApi {
             badRequest(ctx, "Request body is required");
             return;
         }
-        respond(ctx, service.update(id, body));
+        respond(ctx, service.update(id, SysMenu.fromJson(body)));
     }
 
     private void deleteMenu(RoutingContext ctx) {

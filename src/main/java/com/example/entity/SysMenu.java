@@ -3,6 +3,7 @@ package com.example.entity;
 import java.time.LocalDateTime;
 import java.util.List;
 import io.vertx.core.json.JsonObject;
+import io.vertx.sqlclient.Row;
 
 public class SysMenu {
     private Long menuId;
@@ -94,6 +95,64 @@ public class SysMenu {
 
     public String getRemark() { return remark; }
     public void setRemark(String remark) { this.remark = remark; }
+
+    // ================================================================
+    // Static factory methods
+    // ================================================================
+
+    /**
+     * Build SysMenu from a database Row
+     */
+    public static SysMenu toSysMenu(Row row) {
+        SysMenu m = new SysMenu();
+        m.menuId = row.getLong("menu_id");
+        m.menuName = row.getString("menu_name");
+        m.parentId = row.getLong("parent_id");
+        m.orderNum = row.getInteger("order_num");
+        m.path = row.getString("path");
+        m.component = row.getString("component");
+        m.query = row.getString("query");
+        m.routeName = row.getString("route_name");
+        m.isFrame = row.getInteger("is_frame");
+        m.isCache = row.getInteger("is_cache");
+        m.menuType = row.getString("menu_type");
+        m.visible = row.getString("visible");
+        m.status = row.getString("status");
+        m.perms = row.getString("perms");
+        m.icon = row.getString("icon");
+        m.createBy = row.getString("create_by");
+        m.createTime = row.getLocalDateTime("create_time");
+        m.updateBy = row.getString("update_by");
+        m.updateTime = row.getLocalDateTime("update_time");
+        m.remark = row.getString("remark");
+        return m;
+    }
+
+    /**
+     * Build SysMenu from a JsonObject (e.g. HTTP request body)
+     */
+    public static SysMenu fromJson(JsonObject json) {
+        SysMenu m = new SysMenu();
+        m.menuId = json.getLong("menuId");
+        m.menuName = json.getString("menuName");
+        m.parentId = json.getLong("parentId", 0L);
+        m.orderNum = json.getInteger("orderNum", 0);
+        m.path = json.getString("path", "");
+        m.component = json.getString("component");
+        m.query = json.getString("query");
+        m.routeName = json.getString("routeName", "");
+        m.isFrame = json.getInteger("isFrame", 1);
+        m.isCache = json.getInteger("isCache", 0);
+        m.menuType = json.getString("menuType", "M");
+        m.visible = json.getString("visible", "0");
+        m.status = json.getString("status", "0");
+        m.perms = json.getString("perms");
+        m.icon = json.getString("icon", "#");
+        m.createBy = json.getString("createBy", "admin");
+        m.updateBy = json.getString("updateBy");
+        m.remark = json.getString("remark", "");
+        return m;
+    }
 
     private List<SysMenu> children;
     public List<SysMenu> getChildren() { return children; }

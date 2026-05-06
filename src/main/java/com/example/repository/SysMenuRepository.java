@@ -1,13 +1,17 @@
 package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
+import com.example.entity.SysMenu;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.Tuple;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * SysMenu Repository - Database operations for sys_menu table
@@ -21,184 +25,135 @@ public class SysMenuRepository {
     }
 
     // ================================================================
+    // Row → SysMenu helpers
+    // ================================================================
+
+    private List<SysMenu> toMenuList(RowSet<Row> rows) {
+        List<SysMenu> list = new ArrayList<>();
+        for (Row row : rows) {
+            list.add(SysMenu.toSysMenu(row));
+        }
+        return list;
+    }
+
+    private SysMenu toMenuOne(RowSet<Row> rows) {
+        return rows.iterator().hasNext() ? SysMenu.toSysMenu(rows.iterator().next()) : null;
+    }
+
+    // ================================================================
     // QUERY OPERATIONS
     // ================================================================
 
-    /**
-     * Find all menus
-     */
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<SysMenu>> findAll() {
         String sql = "SELECT * FROM sys_menu ORDER BY parent_id, order_num, menu_id";
-        return DatabaseVerticle.query(vertx, sql)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql).map(this::toMenuList);
     }
 
-    /**
-     * Find menu by ID
-     */
-    public Future<JsonObject> findById(Long menuId) {
+    public Future<SysMenu> findById(Long menuId) {
         String sql = "SELECT * FROM sys_menu WHERE menu_id = $1";
-        Tuple params = Tuple.tuple().addLong(menuId);
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(menuId))
+            .map(this::toMenuOne);
     }
 
-    /**
-     * Find menus by parent_id
-     */
-    public Future<List<JsonObject>> findByParentId(Long parentId) {
+    public Future<List<SysMenu>> findByParentId(Long parentId) {
         String sql = "SELECT * FROM sys_menu WHERE parent_id = $1 ORDER BY order_num, menu_id";
-        Tuple params = Tuple.tuple().addLong(parentId);
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(parentId))
+            .map(this::toMenuList);
     }
 
-    /**
-     * Find root menus (parent_id = 0)
-     */
-    public Future<List<JsonObject>> findRootMenus() {
+    public Future<List<SysMenu>> findRootMenus() {
         String sql = "SELECT * FROM sys_menu WHERE parent_id = 0 ORDER BY order_num, menu_id";
-        return DatabaseVerticle.query(vertx, sql)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql).map(this::toMenuList);
     }
 
-    /**
-     * Find menus by menu_type
-     */
-    public Future<List<JsonObject>> findByMenuType(String menuType) {
+    public Future<List<SysMenu>> findByMenuType(String menuType) {
         String sql = "SELECT * FROM sys_menu WHERE menu_type = $1 ORDER BY parent_id, order_num, menu_id";
-        Tuple params = Tuple.tuple().addString(menuType);
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addString(menuType))
+            .map(this::toMenuList);
     }
 
-    /**
-     * Find menus by status
-     */
-    public Future<List<JsonObject>> findByStatus(String status) {
+    public Future<List<SysMenu>> findByStatus(String status) {
         String sql = "SELECT * FROM sys_menu WHERE status = $1 ORDER BY parent_id, order_num, menu_id";
-        Tuple params = Tuple.tuple().addString(status);
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addString(status))
+            .map(this::toMenuList);
     }
 
-    /**
-     * Find visible menus (visible = '0')
-     */
-    public Future<List<JsonObject>> findVisibleMenus() {
+    public Future<List<SysMenu>> findVisibleMenus() {
         String sql = "SELECT * FROM sys_menu WHERE visible = '0' AND status = '0' ORDER BY parent_id, order_num, menu_id";
-        return DatabaseVerticle.query(vertx, sql)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql).map(this::toMenuList);
     }
 
-    /**
-     * Find menus by name (fuzzy search)
-     */
-    public Future<List<JsonObject>> findByMenuName(String menuName) {
+    public Future<List<SysMenu>> findByMenuName(String menuName) {
         if (menuName == null || menuName.isEmpty()) {
             return findAll();
         }
         String sql = "SELECT * FROM sys_menu WHERE menu_name LIKE $1 ORDER BY parent_id, order_num, menu_id";
-        Tuple params = Tuple.tuple().addString("%" + menuName + "%");
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addString("%" + menuName + "%"))
+            .map(this::toMenuList);
     }
 
-    /**
-     * Advanced search with multiple filters
-     */
-    public Future<List<JsonObject>> search(String menuName, String menuType, 
-                                           String status, String visible) {
+    public Future<List<SysMenu>> search(String menuName, String menuType,
+                                         String status, String visible) {
         StringBuilder sql = new StringBuilder("SELECT * FROM sys_menu WHERE 1=1");
         Tuple params = Tuple.tuple();
-        int paramIndex = 1;
+        int idx = 1;
 
         if (menuName != null && !menuName.isEmpty()) {
-            sql.append(" AND menu_name LIKE $").append(paramIndex++);
+            sql.append(" AND menu_name LIKE $").append(idx++);
             params.addString("%" + menuName + "%");
         }
         if (menuType != null && !menuType.isEmpty()) {
-            sql.append(" AND menu_type = $").append(paramIndex++);
+            sql.append(" AND menu_type = $").append(idx++);
             params.addString(menuType);
         }
         if (status != null && !status.isEmpty()) {
-            sql.append(" AND status = $").append(paramIndex++);
+            sql.append(" AND status = $").append(idx++);
             params.addString(status);
         }
         if (visible != null && !visible.isEmpty()) {
-            sql.append(" AND visible = $").append(paramIndex++);
+            sql.append(" AND visible = $").append(idx++);
             params.addString(visible);
         }
         sql.append(" ORDER BY parent_id, order_num, menu_id");
 
-        return DatabaseVerticle.query(vertx, sql.toString(), params)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql.toString(), params).map(this::toMenuList);
     }
 
-    /**
-     * Count all menus
-     */
     public Future<Long> count() {
         String sql = "SELECT COUNT(*) as count FROM sys_menu";
         return DatabaseVerticle.query(vertx, sql)
             .map(rows -> rows.iterator().next().getLong("count"));
     }
 
-    /**
-     * Count children by parent_id
-     */
     public Future<Long> countByParentId(Long parentId) {
         String sql = "SELECT COUNT(*) as count FROM sys_menu WHERE parent_id = $1";
-        Tuple params = Tuple.tuple().addLong(parentId);
-        return DatabaseVerticle.query(vertx, sql, params)
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(parentId))
             .map(rows -> rows.iterator().next().getLong("count"));
     }
 
-    /**
-     * Check if menu has children
-     */
     public Future<Boolean> hasChildren(Long menuId) {
         String sql = "SELECT COUNT(*) as count FROM sys_menu WHERE parent_id = $1";
-        Tuple params = Tuple.tuple().addLong(menuId);
-        return DatabaseVerticle.query(vertx, sql, params)
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(menuId))
             .map(rows -> rows.iterator().next().getLong("count") > 0);
     }
 
-    /**
-     * Check if menu_name exists under same parent
-     */
     public Future<Boolean> existsByNameAndParent(String menuName, Long parentId) {
         String sql = "SELECT COUNT(*) as count FROM sys_menu WHERE menu_name = $1 AND parent_id = $2";
-        Tuple params = Tuple.tuple().addString(menuName).addLong(parentId);
-        return DatabaseVerticle.query(vertx, sql, params)
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addString(menuName).addLong(parentId))
             .map(rows -> rows.iterator().next().getLong("count") > 0);
     }
 
-    /**
-     * Check if menu_name exists under same parent excluding specific ID
-     */
     public Future<Boolean> existsByNameAndParentExcludeId(String menuName, Long parentId, Long excludeId) {
         String sql = "SELECT COUNT(*) as count FROM sys_menu WHERE menu_name = $1 AND parent_id = $2 AND menu_id != $3";
-        Tuple params = Tuple.tuple().addString(menuName).addLong(parentId).addLong(excludeId);
-        return DatabaseVerticle.query(vertx, sql, params)
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addString(menuName).addLong(parentId).addLong(excludeId))
             .map(rows -> rows.iterator().next().getLong("count") > 0);
     }
 
-    /**
-     * Alias for existsByNameAndParent - check if menu name exists under same parent
-     */
     public Future<Boolean> existsByNameUnderParent(String menuName, Long parentId) {
         return existsByNameAndParent(menuName, parentId);
     }
 
-    /**
-     * Find all ancestor menu IDs (for circular reference check)
-     */
-    public Future<java.util.List<Long>> findAllAncestorIds(Long menuId) {
-        // Recursive CTE to find all ancestors
+    public Future<List<Long>> findAllAncestorIds(Long menuId) {
         String sql = """
             WITH RECURSIVE ancestors AS (
                 SELECT menu_id, parent_id FROM sys_menu WHERE menu_id = $1
@@ -208,10 +163,9 @@ public class SysMenuRepository {
             )
             SELECT menu_id FROM ancestors WHERE menu_id != $1
             """;
-        Tuple params = Tuple.tuple().addLong(menuId);
-        return DatabaseVerticle.query(vertx, sql, params)
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(menuId))
             .map(rows -> {
-                java.util.List<Long> ids = new java.util.ArrayList<>();
+                List<Long> ids = new ArrayList<>();
                 for (Row row : rows) {
                     ids.add(row.getLong("menu_id"));
                 }
@@ -219,35 +173,37 @@ public class SysMenuRepository {
             });
     }
 
-    /**
-     * Build menu tree from flat list
-     */
-    public Future<List<JsonObject>> findMenuTree() {
+    // ================================================================
+    // MENU TREE
+    // ================================================================
+
+    public Future<List<SysMenu>> findMenuTree() {
         return findAll()
             .map(menus -> {
-                java.util.Map<Long, JsonObject> menuMap = new java.util.HashMap<>();
-                java.util.List<JsonObject> roots = new java.util.ArrayList<>();
-                
-                // First pass: create map
-                for (JsonObject menu : menus) {
-                    menuMap.put(menu.getLong("menuId"), menu.copy());
+                java.util.Map<Long, SysMenu> menuMap = new java.util.LinkedHashMap<>();
+                List<SysMenu> roots = new ArrayList<>();
+
+                // First pass: index by menuId
+                for (SysMenu m : menus) {
+                    menuMap.put(m.getMenuId(), m);
                 }
-                
+
                 // Second pass: build tree
-                for (JsonObject menu : menus) {
-                    Long parentId = menu.getLong("parentId");
+                for (SysMenu m : menus) {
+                    Long parentId = m.getParentId();
                     if (parentId == null || parentId == 0) {
-                        roots.add(menuMap.get(menu.getLong("menuId")));
+                        roots.add(m);
                     } else {
-                        JsonObject parent = menuMap.get(parentId);
+                        SysMenu parent = menuMap.get(parentId);
                         if (parent != null) {
-                            java.util.List<JsonObject> children = parent.getJsonArray("children", new io.vertx.core.json.JsonArray()).getList();
-                            children.add(menuMap.get(menu.getLong("menuId")));
-                            parent.put("children", new io.vertx.core.json.JsonArray(children));
+                            if (parent.getChildren() == null) {
+                                parent.setChildren(new ArrayList<>());
+                            }
+                            parent.getChildren().add(m);
                         }
                     }
                 }
-                
+
                 return roots;
             });
     }
@@ -256,45 +212,35 @@ public class SysMenuRepository {
     // MUTATION OPERATIONS
     // ================================================================
 
-    /**
-     * Create a new menu
-     */
-    public Future<JsonObject> create(JsonObject menu) {
+    public Future<SysMenu> create(SysMenu menu) {
         String sql = """
-            INSERT INTO sys_menu (menu_name, parent_id, order_num, path, component, 
-                                  query, route_name, is_frame, is_cache, menu_type, 
+            INSERT INTO sys_menu (menu_name, parent_id, order_num, path, component,
+                                  query, route_name, is_frame, is_cache, menu_type,
                                   visible, status, perms, icon, create_by, remark)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *
             """;
         Tuple params = Tuple.tuple()
-            .addString(menu.getString("menuName"))
-            .addLong(menu.getLong("parentId", 0L))
-            .addInteger(menu.getInteger("orderNum", 0))
-            .addString(menu.getString("path", ""))
-            .addString(menu.getString("component"))
-            .addString(menu.getString("query"))
-            .addString(menu.getString("routeName", ""))
-            .addInteger(menu.getInteger("isFrame", 1))
-            .addInteger(menu.getInteger("isCache", 0))
-            .addString(menu.getString("menuType", "M"))
-            .addString(menu.getString("visible", "0"))
-            .addString(menu.getString("status", "0"))
-            .addString(menu.getString("perms"))
-            .addString(menu.getString("icon", "#"))
-            .addString(menu.getString("createBy", "admin"))
-            .addString(menu.getString("remark", ""));
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+            .addString(menu.getMenuName())
+            .addLong(menu.getParentId() != null ? menu.getParentId() : 0L)
+            .addInteger(menu.getOrderNum() != null ? menu.getOrderNum() : 0)
+            .addString(menu.getPath() != null ? menu.getPath() : "")
+            .addString(menu.getComponent())
+            .addString(menu.getQuery())
+            .addString(menu.getRouteName() != null ? menu.getRouteName() : "")
+            .addInteger(menu.getIsFrame() != null ? menu.getIsFrame() : 1)
+            .addInteger(menu.getIsCache() != null ? menu.getIsCache() : 0)
+            .addString(menu.getMenuType() != null ? menu.getMenuType() : "M")
+            .addString(menu.getVisible() != null ? menu.getVisible() : "0")
+            .addString(menu.getStatus() != null ? menu.getStatus() : "0")
+            .addString(menu.getPerms())
+            .addString(menu.getIcon() != null ? menu.getIcon() : "#")
+            .addString(menu.getCreateBy() != null ? menu.getCreateBy() : "admin")
+            .addString(menu.getRemark() != null ? menu.getRemark() : "");
+        return DatabaseVerticle.query(vertx, sql, params).map(this::toMenuOne);
     }
 
-    /**
-     * Update an existing menu
-     */
-    public Future<JsonObject> update(Long menuId, JsonObject menu) {
+    public Future<SysMenu> update(Long menuId, SysMenu menu) {
         String sql = """
             UPDATE sys_menu
             SET menu_name = COALESCE($2, menu_name),
@@ -319,45 +265,34 @@ public class SysMenuRepository {
             """;
         Tuple params = Tuple.tuple()
             .addLong(menuId)
-            .addString(menu.getString("menuName"))
-            .addLong(menu.getLong("parentId"))
-            .addInteger(menu.getInteger("orderNum"))
-            .addString(menu.getString("path"))
-            .addString(menu.getString("component"))
-            .addString(menu.getString("query"))
-            .addString(menu.getString("routeName"))
-            .addInteger(menu.getInteger("isFrame"))
-            .addInteger(menu.getInteger("isCache"))
-            .addString(menu.getString("menuType"))
-            .addString(menu.getString("visible"))
-            .addString(menu.getString("status"))
-            .addString(menu.getString("perms"))
-            .addString(menu.getString("icon"))
-            .addString(menu.getString("updateBy"))
-            .addString(menu.getString("remark"));
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+            .addString(menu.getMenuName())
+            .addLong(menu.getParentId())
+            .addInteger(menu.getOrderNum())
+            .addString(menu.getPath())
+            .addString(menu.getComponent())
+            .addString(menu.getQuery())
+            .addString(menu.getRouteName())
+            .addInteger(menu.getIsFrame())
+            .addInteger(menu.getIsCache())
+            .addString(menu.getMenuType())
+            .addString(menu.getVisible())
+            .addString(menu.getStatus())
+            .addString(menu.getPerms())
+            .addString(menu.getIcon())
+            .addString(menu.getUpdateBy())
+            .addString(menu.getRemark());
+        return DatabaseVerticle.query(vertx, sql, params).map(this::toMenuOne);
     }
 
-    /**
-     * Delete a menu by ID
-     */
     public Future<Boolean> delete(Long menuId) {
         String sql = "DELETE FROM sys_menu WHERE menu_id = $1 RETURNING menu_id";
-        Tuple params = Tuple.tuple().addLong(menuId);
-        return DatabaseVerticle.query(vertx, sql, params)
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(menuId))
             .map(rows -> rows.rowCount() > 0);
     }
 
-    /**
-     * Delete multiple menus by IDs
-     */
     public Future<Integer> deleteByIds(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return Future.succeededFuture(0);
-        String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(java.util.stream.Collectors.joining(","));
+        String placeholders = ids.stream().map(i -> "$" + (ids.indexOf(i) + 1)).collect(Collectors.joining(","));
         String sql = "DELETE FROM sys_menu WHERE menu_id IN (" + placeholders + ")";
         Tuple params = Tuple.tuple();
         for (Long id : ids) params.addLong(id);
@@ -368,74 +303,63 @@ public class SysMenuRepository {
     // PAGINATION
     // ================================================================
 
-    /**
-     * Find with pagination
-     */
-    public Future<List<JsonObject>> findPaginated(int page, int size) {
+    public Future<List<SysMenu>> findPaginated(int page, int size) {
         int offset = (page - 1) * size;
         String sql = "SELECT * FROM sys_menu ORDER BY parent_id, order_num, menu_id LIMIT $1 OFFSET $2";
-        Tuple params = Tuple.tuple().addInteger(size).addInteger(offset);
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addInteger(size).addInteger(offset))
+            .map(this::toMenuList);
     }
 
-    /**
-     * Advanced search with pagination
-     */
-    public Future<List<JsonObject>> searchPaginated(String menuName, String menuType,
-                                                     String status, String visible,
-                                                     int page, int size) {
+    public Future<List<SysMenu>> searchPaginated(String menuName, String menuType,
+                                                   String status, String visible,
+                                                   int page, int size) {
         int offset = (page - 1) * size;
         StringBuilder sql = new StringBuilder("SELECT * FROM sys_menu WHERE 1=1");
         Tuple params = Tuple.tuple();
-        int paramIndex = 1;
+        int idx = 1;
 
         if (menuName != null && !menuName.isEmpty()) {
-            sql.append(" AND menu_name LIKE $").append(paramIndex++);
+            sql.append(" AND menu_name LIKE $").append(idx++);
             params.addString("%" + menuName + "%");
         }
         if (menuType != null && !menuType.isEmpty()) {
-            sql.append(" AND menu_type = $").append(paramIndex++);
+            sql.append(" AND menu_type = $").append(idx++);
             params.addString(menuType);
         }
         if (status != null && !status.isEmpty()) {
-            sql.append(" AND status = $").append(paramIndex++);
+            sql.append(" AND status = $").append(idx++);
             params.addString(status);
         }
         if (visible != null && !visible.isEmpty()) {
-            sql.append(" AND visible = $").append(paramIndex++);
+            sql.append(" AND visible = $").append(idx++);
             params.addString(visible);
         }
-        sql.append(" ORDER BY parent_id, order_num, menu_id LIMIT $").append(paramIndex++).append(" OFFSET $").append(paramIndex);
+        sql.append(" ORDER BY parent_id, order_num, menu_id LIMIT $").append(idx++).append(" OFFSET $").append(idx);
         params.addInteger(size).addInteger(offset);
 
-        return DatabaseVerticle.query(vertx, sql.toString(), params)
-            .map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql.toString(), params).map(this::toMenuList);
     }
 
-    /**
-     * Count search results (for pagination total)
-     */
     public Future<Long> searchCount(String menuName, String menuType,
                                      String status, String visible) {
         StringBuilder sql = new StringBuilder("SELECT COUNT(*) as count FROM sys_menu WHERE 1=1");
         Tuple params = Tuple.tuple();
-        int paramIndex = 1;
+        int idx = 1;
 
         if (menuName != null && !menuName.isEmpty()) {
-            sql.append(" AND menu_name LIKE $").append(paramIndex++);
+            sql.append(" AND menu_name LIKE $").append(idx++);
             params.addString("%" + menuName + "%");
         }
         if (menuType != null && !menuType.isEmpty()) {
-            sql.append(" AND menu_type = $").append(paramIndex++);
+            sql.append(" AND menu_type = $").append(idx++);
             params.addString(menuType);
         }
         if (status != null && !status.isEmpty()) {
-            sql.append(" AND status = $").append(paramIndex++);
+            sql.append(" AND status = $").append(idx++);
             params.addString(status);
         }
         if (visible != null && !visible.isEmpty()) {
-            sql.append(" AND visible = $").append(paramIndex++);
+            sql.append(" AND visible = $").append(idx++);
             params.addString(visible);
         }
 

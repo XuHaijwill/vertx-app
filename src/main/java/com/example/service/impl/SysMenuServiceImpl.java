@@ -5,16 +5,17 @@ import com.example.core.PageResult;
 import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
 import com.example.db.DatabaseVerticle;
+import com.example.entity.SysMenu;
 import com.example.repository.SysMenuRepository;
 import com.example.service.SysMenuService;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * System Menu Service Implementation
@@ -33,16 +34,24 @@ public class SysMenuServiceImpl implements SysMenuService {
         this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
 
+    // ================================================================
+    // Helper: SysMenu list → JsonObject list
+    // ================================================================
+
+    private List<JsonObject> toJsonObjectList(List<SysMenu> menus) {
+        return menus.stream().map(SysMenu::toJson).collect(Collectors.toList());
+    }
+
     @Override
     public Future<List<JsonObject>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(List.of());
-        return repo.findAll();
+        return repo.findAll().map(this::toJsonObjectList);
     }
 
     @Override
     public Future<List<JsonObject>> findMenuTree() {
         if (!dbAvailable) return Future.succeededFuture(List.of());
-        return repo.findMenuTree();
+        return repo.findMenuTree().map(this::toJsonObjectList);
     }
 
     @Override
@@ -51,66 +60,64 @@ public class SysMenuServiceImpl implements SysMenuService {
         return repo.findById(id)
             .map(menu -> {
                 if (menu == null) throw BusinessException.notFound("Menu");
-                return menu;
+                return menu.toJson();
             });
     }
 
     @Override
     public Future<List<JsonObject>> findByParentId(Long parentId) {
         if (!dbAvailable) return Future.succeededFuture(List.of());
-        return repo.findByParentId(parentId);
+        return repo.findByParentId(parentId).map(this::toJsonObjectList);
     }
 
     @Override
     public Future<List<JsonObject>> findVisibleMenus() {
         if (!dbAvailable) return Future.succeededFuture(List.of());
-        return repo.findVisibleMenus();
+        return repo.findVisibleMenus().map(this::toJsonObjectList);
     }
 
     @Override
-    public Future<JsonObject> create(JsonObject menu) {
+    public Future<JsonObject> create(SysMenu menu) {
         if (menu == null) {
             return Future.failedFuture(BusinessException.badRequest("Request body is required"));
         }
-        String menuName = menu.getString("menuName");
+        String menuName = menu.getMenuName();
         if (menuName == null || menuName.isBlank()) {
             return Future.failedFuture(BusinessException.badRequest("menuName is required"));
         }
 
-        Long parentId = menu.getLong("parentId", 0L);
+        Long parentId = menu.getParentId() != null ? menu.getParentId() : 0L;
 
         if (!dbAvailable) {
-            return Future.succeededFuture(menu.copy().put("menuId", System.currentTimeMillis()));
+            return Future.succeededFuture(menu.toJson().put("menuId", System.currentTimeMillis()));
         }
 
-        // Check for duplicate name under same parent
         return repo.existsByNameUnderParent(menuName, parentId)
             .compose(exists -> {
                 if (exists) {
-                    return Future.<JsonObject>failedFuture(
+                    return Future.<SysMenu>failedFuture(
                         BusinessException.conflict("Menu name already exists under this parent"));
                 }
-                return repo.create(menu)
-                    .compose(created -> audit.log(
-                            AuditAction.AUDIT_CREATE, "sys_menu",
-                            String.valueOf(created.getLong("menuId")),
-                            null, created)
-                        .map(created));
-            });
+                return repo.create(menu);
+            })
+            .compose(created -> audit.log(
+                    AuditAction.AUDIT_CREATE, "sys_menu",
+                    String.valueOf(created.getMenuId()),
+                    null, created.toJson())
+                .map(created.toJson()));
     }
 
     @Override
-    public Future<JsonObject> update(Long id, JsonObject menu) {
+    public Future<JsonObject> update(Long id, SysMenu menu) {
         if (!dbAvailable) {
-            return Future.succeededFuture(menu.copy().put("menuId", id));
+            return Future.succeededFuture(menu.toJson().put("menuId", id));
         }
         return repo.findById(id)
-            .compose(existing -> {
+            .compose((SysMenu existing) -> {
                 if (existing == null) {
                     return Future.<JsonObject>failedFuture(BusinessException.notFound("Menu"));
                 }
-                // Check for circular reference
-                Long newParentId = menu.getLong("parentId");
+                Long newParentId = menu.getParentId();
                 if (newParentId != null) {
                     if (newParentId.equals(id)) {
                         return Future.<JsonObject>failedFuture(
@@ -122,20 +129,25 @@ public class SysMenuServiceImpl implements SysMenuService {
                                 return Future.<JsonObject>failedFuture(
                                     BusinessException.badRequest("Circular reference detected"));
                             }
-                            return doUpdate(id, menu, existing);
+                            return doUpdateAndConvert(id, menu, existing);
                         });
                 }
-                return doUpdate(id, menu, existing);
+                return doUpdateAndConvert(id, menu, existing);
             });
     }
 
-    private Future<JsonObject> doUpdate(Long id, JsonObject menu, JsonObject existing) {
+    private Future<SysMenu> doUpdate(Long id, SysMenu menu, SysMenu existing) {
         return repo.update(id, menu)
             .compose(updated -> audit.log(
                     AuditAction.AUDIT_UPDATE, "sys_menu",
                     String.valueOf(id),
-                    existing, updated)
+                    existing.toJson(), updated.toJson())
                 .map(updated));
+    }
+
+    // update() 需要最后 SysMenu → JsonObject
+    private Future<JsonObject> doUpdateAndConvert(Long id, SysMenu menu, SysMenu existing) {
+        return doUpdate(id, menu, existing).map(SysMenu::toJson);
     }
 
     private Future<Boolean> checkCircularReference(Long menuId, Long newParentId) {
@@ -161,7 +173,7 @@ public class SysMenuServiceImpl implements SysMenuService {
                             .compose(v -> audit.log(
                                     AuditAction.AUDIT_DELETE, "sys_menu",
                                     String.valueOf(id),
-                                    existing, null)
+                                    existing.toJson(), null)
                                 .mapEmpty());
                     });
             });
@@ -186,7 +198,7 @@ public class SysMenuServiceImpl implements SysMenuService {
         }
         return repo.count()
             .compose(total -> repo.findPaginated(page, size)
-                .map(list -> new PageResult<>(list, total, page, size)));
+                .map(list -> new PageResult<>(toJsonObjectList(list), total, page, size)));
     }
 
     @Override
