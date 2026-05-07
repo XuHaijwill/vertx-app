@@ -119,7 +119,7 @@ paths:
             schema:
               type: object
               properties:
-                redirect_uri:
+                redirectUri:
                   type: string
                   description: URL to redirect after logout
                   example: http://localhost:3000
@@ -249,14 +249,14 @@ paths:
                     age: 28
                     department: Engineering
                     status: active
-                    created_at: "2026-04-26T00:00:00Z"
+                    createdAt: "2026-04-26T00:00:00Z"
                   - id: 2
                     name: Bob
                     email: bob@example.com
                     age: 32
                     department: Product
                     status: active
-                    created_at: "2026-04-26T00:00:00Z"
+                    createdAt: "2026-04-26T00:00:00Z"
     post:
       tags:
         - Users
@@ -1337,8 +1337,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateDictTypeRequest'
             example:
-              dict_name: System Status
-              dict_type: sys_status
+              dictName: System Status
+              dictType: sys_status
               status: "0"
               remark: System status dictionary
       responses:
@@ -1551,10 +1551,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateDictDataRequest'
             example:
-              dict_type: sys_normal_disable
-              dict_label: Normal
-              dict_value: "0"
-              dict_sort: 1
+              dictType: sys_normal_disable
+              dictLabel: Normal
+              dictValue: "0"
+              dictSort: 1
               status: "0"
               remark: Normal status
       responses:
@@ -1689,17 +1689,17 @@ paths:
               example:
                 code: success
                 data:
-                  - dict_code: 1
-                    dict_sort: 1
-                    dict_label: Normal
-                    dict_value: "0"
-                    dict_type: sys_normal_disable
+                  - dictCode: 1
+                    dictSort: 1
+                    dictLabel: Normal
+                    dictValue: "0"
+                    dictType: sys_normal_disable
                     status: "0"
-                  - dict_code: 2
-                    dict_sort: 2
-                    dict_label: Disabled
-                    dict_value: "1"
-                    dict_type: sys_normal_disable
+                  - dictCode: 2
+                    dictSort: 2
+                    dictLabel: Disabled
+                    dictValue: "1"
+                    dictType: sys_normal_disable
                     status: "0"
     delete:
       tags:
@@ -2584,10 +2584,10 @@ components:
           type: string
           enum: [active, inactive]
           example: active
-        created_at:
+        createdAt:
           type: string
           format: date-time
-        updated_at:
+        updatedAt:
           type: string
           format: date-time
 
@@ -2680,10 +2680,10 @@ components:
         status:
           type: string
           enum: [active, inactive]
-        created_at:
+        createdAt:
           type: string
           format: date-time
-        updated_at:
+        updatedAt:
           type: string
           format: date-time
 
@@ -2837,10 +2837,10 @@ components:
         id:
           type: integer
           format: int64
-        order_id:
+        orderId:
           type: integer
           format: int64
-        product_id:
+        productId:
           type: integer
           format: int64
         quantity:
@@ -2848,7 +2848,7 @@ components:
         price:
           type: string
           description: Price as decimal string
-        created_at:
+        createdAt:
           type: string
           format: date-time
 
@@ -2858,7 +2858,7 @@ components:
         id:
           type: integer
           format: int64
-        user_id:
+        userId:
           type: integer
           format: int64
         status:
@@ -2869,10 +2869,10 @@ components:
           description: Order total as decimal string
         remark:
           type: string
-        created_at:
+        createdAt:
           type: string
           format: date-time
-        updated_at:
+        updatedAt:
           type: string
           format: date-time
 
@@ -2965,10 +2965,10 @@ components:
         id:
           type: integer
           format: int64
-        order_id:
+        orderId:
           type: integer
           format: int64
-        user_id:
+        userId:
           type: integer
           format: int64
         amount:
@@ -2980,20 +2980,20 @@ components:
         status:
           type: string
           enum: [pending, completed, failed, refunded]
-        transaction_no:
+        transactionNo:
           type: string
           nullable: true
         remark:
           type: string
           nullable: true
-        completed_at:
+        completedAt:
           type: string
           format: date-time
           nullable: true
-        created_at:
+        createdAt:
           type: string
           format: date-time
-        updated_at:
+        updatedAt:
           type: string
           format: date-time
         # Enriched fields (from JOINs)
@@ -3639,48 +3639,48 @@ components:
           format: int64
         name:
           type: string
-        task_type:
+        taskType:
           type: string
           enum: [HTTP, SQL, CLASS]
-        cron_expr:
+        cronExpr:
           type: string
           nullable: true
-        http_url:
+        httpUrl:
           type: string
           nullable: true
-        http_method:
+        httpMethod:
           type: string
           nullable: true
-        sql_query:
+        sqlQuery:
           type: string
           nullable: true
-        class_name:
+        className:
           type: string
           nullable: true
-        class_method:
+        classMethod:
           type: string
           nullable: true
         status:
           type: string
           enum: [ACTIVE, PAUSED]
-        last_run_time:
+        lastRunTime:
           type: string
           format: date-time
           nullable: true
-        last_run_status:
+        lastRunStatus:
           type: string
           nullable: true
-        last_run_result:
+        lastRunResult:
           type: string
           nullable: true
-        next_run_time:
+        nextRunTime:
           type: string
           format: date-time
           nullable: true
-        created_at:
+        createdAt:
           type: string
           format: date-time
-        updated_at:
+        updatedAt:
           type: string
           format: date-time
 
@@ -3688,29 +3688,29 @@ components:
       type: object
       required:
         - name
-        - task_type
+        - taskType
       properties:
         name:
           type: string
-        task_type:
+        taskType:
           type: string
           enum: [HTTP, SQL, CLASS]
-        cron_expr:
+        cronExpr:
           type: string
-        http_url:
+        httpUrl:
           type: string
-        http_method:
+        httpMethod:
           type: string
           enum: [GET, POST, PUT, DELETE]
-        http_headers:
+        httpHeaders:
           type: object
-        http_body:
+        httpBody:
           type: string
-        sql_query:
+        sqlQuery:
           type: string
-        class_name:
+        className:
           type: string
-        class_method:
+        classMethod:
           type: string
         status:
           type: string
@@ -3722,21 +3722,21 @@ components:
       properties:
         name:
           type: string
-        cron_expr:
+        cronExpr:
           type: string
-        http_url:
+        httpUrl:
           type: string
-        http_method:
+        httpMethod:
           type: string
-        http_headers:
+        httpHeaders:
           type: object
-        http_body:
+        httpBody:
           type: string
-        sql_query:
+        sqlQuery:
           type: string
-        class_name:
+        className:
           type: string
-        class_method:
+        classMethod:
           type: string
         status:
           type: string

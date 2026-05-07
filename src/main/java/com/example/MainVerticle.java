@@ -45,6 +45,9 @@ public class MainVerticle extends AbstractVerticle {
 
     @Override
     public void start(Promise<Void> startPromise) {
+        // Configure Jackson for Java 8 date/time types
+        configureJackson();
+        
         // Initialize TokenCacheManager first
         TokenCacheManager.initialize(config());
         
@@ -74,6 +77,26 @@ public class MainVerticle extends AbstractVerticle {
                     stopPromise.complete();
                 })
                 .onFailure(stopPromise::fail);
+    }
+
+    // ================================================================
+    // Jackson Configuration
+    // ================================================================
+
+    /**
+     * Configure Jackson ObjectMapper to handle Java 8 date/time types.
+     * Must be called before any JSON serialization.
+     */
+    private void configureJackson() {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = io.vertx.core.json.jackson.DatabindCodec.mapper();
+        
+        // Register JSR310 module for Java 8 date/time types
+        mapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        
+        // Disable writing dates as timestamps (use ISO-8601 format instead)
+        mapper.disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        
+        LOG.info("[OK] Jackson configured with JavaTimeModule");
     }
 
     // ================================================================
