@@ -1,5 +1,6 @@
 package com.example.api;
 
+import com.example.auth.RequirePermission;
 import com.example.entity.SysMenu;
 import com.example.service.SysMenuService;
 import com.example.service.impl.SysMenuServiceImpl;
@@ -22,14 +23,47 @@ public class SysMenuApi extends BaseApi {
 
     @Override
     public void registerRoutes(Router router, String contextPath) {
-        router.get(contextPath + "/api/menus").handler(this::listMenus);
-        router.get(contextPath + "/api/menus/tree").handler(this::getMenuTree);
-        router.get(contextPath + "/api/menus/:id").handler(this::getMenu);
-        router.get(contextPath + "/api/menus/parent/:parentId").handler(this::getMenusByParent);
-        router.get(contextPath + "/api/menus/visible").handler(this::getVisibleMenus);
-        router.post(contextPath + "/api/menus").handler(this::createMenu);
-        router.put(contextPath + "/api/menus/:id").handler(this::updateMenu);
-        router.delete(contextPath + "/api/menus/:id").handler(this::deleteMenu);
+        // ---- List / Query ----
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:list')")
+        router.get(contextPath + "/api/menus")
+            .handler(RequirePermission.of("system:menu:list"))
+            .handler(this::listMenus);
+
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:query')")
+        router.get(contextPath + "/api/menus/tree")
+            .handler(RequirePermission.of("system:menu:query"))
+            .handler(this::getMenuTree);
+
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:query')")
+        router.get(contextPath + "/api/menus/:id")
+            .handler(RequirePermission.of("system:menu:query"))
+            .handler(this::getMenu);
+
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:list')")
+        router.get(contextPath + "/api/menus/parent/:parentId")
+            .handler(RequirePermission.of("system:menu:list"))
+            .handler(this::getMenusByParent);
+
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:list')")
+        router.get(contextPath + "/api/menus/visible")
+            .handler(RequirePermission.of("system:menu:list"))
+            .handler(this::getVisibleMenus);
+
+        // ---- Write ----
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:add')")
+        router.post(contextPath + "/api/menus")
+            .handler(RequirePermission.of("system:menu:add"))
+            .handler(this::createMenu);
+
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:edit')")
+        router.put(contextPath + "/api/menus/:id")
+            .handler(RequirePermission.of("system:menu:edit"))
+            .handler(this::updateMenu);
+
+        // 等效 @PreAuthorize("@ss.hasPermi('system:menu:remove')")
+        router.delete(contextPath + "/api/menus/:id")
+            .handler(RequirePermission.of("system:menu:remove"))
+            .handler(this::deleteMenu);
     }
 
     // ================================================================

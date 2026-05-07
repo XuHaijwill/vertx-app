@@ -20,6 +20,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Keycloak JWT Authentication Handler for Vert.x 5.
@@ -156,6 +159,20 @@ public class KeycloakAuthHandler implements io.vertx.core.Handler<RoutingContext
                 ctx.put("roles", cachedInfo.getRoles());
                 ctx.put("authEnabled", true);
                 ctx.put("tokenFromCache", true);
+
+                // Restore AuthUser from cached info
+                AuthUser authUser = new AuthUser()
+                    .setUsername(cachedInfo.getUsername())
+                    .setRoles(cachedInfo.getRoles())
+                    .setRawToken(cachedInfo.getPrincipal());
+                Long uid = cachedInfo.getPrincipal().getLong("user_id");
+                if (uid == null) {
+                    String sub = cachedInfo.getPrincipal().getString("sub");
+                    if (sub != null) uid = hashToLong(sub);
+                }
+                authUser.setUserId(uid);
+                ctx.put("authUser", authUser);
+
                 LOG.debug("[AUTH] Token validated from cache: {}", cachedInfo.getUsername());
                 ctx.next();
                 return;
@@ -178,11 +195,30 @@ public class KeycloakAuthHandler implements io.vertx.core.Handler<RoutingContext
                     cacheManager.put(token, tokenInfo, roles, username, expiresAt);
                 }
 
+                // Build AuthUser for the permission system
+                AuthUser authUser = new AuthUser()
+                    .setUsername(username)
+                    .setEmail(tokenInfo.getString("email"))
+                    .setName(tokenInfo.getString("name"))
+                    .setRoles(roles)
+                    .setRawToken(tokenInfo);
+
+                // Try to get userId from custom claim "user_id" (Long)
+                // or hash the "sub" claim to a numeric value
+                Long userId = tokenInfo.getLong("user_id");
+                if (userId == null) {
+                    String sub = tokenInfo.getString("sub");
+                    if (sub != null) userId = hashToLong(sub);
+                }
+                authUser.setUserId(userId);
+
                 ctx.put("user", tokenInfo);
                 ctx.put("username", username);
                 ctx.put("roles", roles);
                 ctx.put("authEnabled", true);
                 ctx.put("tokenFromCache", false);
+                // AuthUser for the permission system
+                ctx.put("authUser", authUser);
 
                 LOG.debug("[AUTH] JWT validated: {}, roles: {}", username, roles);
                 ctx.next();
@@ -235,6 +271,20 @@ public class KeycloakAuthHandler implements io.vertx.core.Handler<RoutingContext
         roles.addAll(simpleRoles);
 
         return roles;
+    }
+
+    private static long hashToLong(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            long h = 0;
+            for (int i = 0; i < 8; i++) {
+                h = (h << 8) | (hash[i] & 0xFF);
+            }
+            return Math.abs(h);
+        } catch (NoSuchAlgorithmException e) {
+            return input.hashCode();
+        }
     }
 
     private void sendUnauthorized(RoutingContext ctx, String reason) {
