@@ -46,6 +46,8 @@ tags:
     description: Menu permission management operations
   - name: Auth
     description: Authentication and authorization endpoints
+  - name: Audit
+    description: Audit log management and query operations
 
 paths:
   # ================================================================
@@ -2279,6 +2281,275 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  # ================================================================
+  # AUDIT ENDPOINTS
+  # ================================================================
+  /api/audit/logs:
+    get:
+      tags:
+        - Audit
+      summary: List all audit logs
+      description: Retrieve a paginated list of audit logs with optional filtering
+      operationId: listAuditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number (0-indexed)
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Page size
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: entityType
+          in: query
+          description: Filter by entity type (e.g., Order, Payment, Product)
+          schema:
+            type: string
+        - name: action
+          in: query
+          description: Filter by action (CREATE, UPDATE, DELETE)
+          schema:
+            type: string
+            enum: [CREATE, UPDATE, DELETE]
+        - name: userId
+          in: query
+          description: Filter by user ID
+          schema:
+            type: integer
+            format: int64
+        - name: status
+          in: query
+          description: Filter by status
+          schema:
+            type: string
+            enum: [SUCCESS, FAILED]
+        - name: startTime
+          in: query
+          description: Start time (ISO-8601 format)
+          schema:
+            type: string
+            format: date-time
+        - name: endTime
+          in: query
+          description: End time (ISO-8601 format)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Paginated audit logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: success
+                data:
+                  content:
+                    - id: 1
+                      entityType: Order
+                      entityId: "12345"
+                      userId: 1
+                      username: admin
+                      action: CREATE
+                      oldValues: null
+                      newValues:
+                        orderNo: ORD-2026-001
+                        status: PENDING
+                      status: SUCCESS
+                      traceId: abc123
+                      createdAt: "2026-05-07T08:00:00"
+                  totalElements: 100
+                  totalPages: 5
+                  size: 20
+                  number: 0
+
+  /api/audit/logs/{id}:
+    get:
+      tags:
+        - Audit
+      summary: Get audit log by ID
+      description: Retrieve a specific audit log entry by its ID
+      operationId: getAuditLogById
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Audit log ID
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Audit log found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: success
+                data:
+                  id: 1
+                  entityType: Order
+                  entityId: "12345"
+                  userId: 1
+                  username: admin
+                  action: CREATE
+                  oldValues: null
+                  newValues:
+                    orderNo: ORD-2026-001
+                    status: PENDING
+                  status: SUCCESS
+                  traceId: abc123
+                  createdAt: "2026-05-07T08:00:00"
+        '404':
+          description: Audit log not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: error
+                message: Audit log not found
+
+  /api/audit/logs/entity/{entityType}/{entityId}:
+    get:
+      tags:
+        - Audit
+      summary: Get audit logs by entity
+      description: Retrieve all audit logs for a specific entity
+      operationId: getAuditLogsByEntity
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: entityType
+          in: path
+          required: true
+          description: Entity type (e.g., Order, Payment, Product)
+          schema:
+            type: string
+        - name: entityId
+          in: path
+          required: true
+          description: Entity ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audit logs for the entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: success
+                data:
+                  - id: 1
+                    entityType: Order
+                    entityId: "12345"
+                    action: CREATE
+                    status: SUCCESS
+                    createdAt: "2026-05-07T08:00:00"
+                  - id: 2
+                    entityType: Order
+                    entityId: "12345"
+                    action: UPDATE
+                    status: SUCCESS
+                    createdAt: "2026-05-07T08:05:00"
+
+  /api/audit/stats:
+    get:
+      tags:
+        - Audit
+      summary: Get audit log statistics
+      description: Retrieve statistics about audit logs (counts by entity type, action, status)
+      operationId: getAuditStats
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: startTime
+          in: query
+          description: Start time for statistics (ISO-8601 format)
+          schema:
+            type: string
+            format: date-time
+        - name: endTime
+          in: query
+          description: End time for statistics (ISO-8601 format)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Audit statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: success
+                data:
+                  totalLogs: 1000
+                  byEntityType:
+                    Order: 450
+                    Payment: 300
+                    Product: 250
+                  byAction:
+                    CREATE: 400
+                    UPDATE: 450
+                    DELETE: 150
+                  byStatus:
+                    SUCCESS: 980
+                    FAILED: 20
+
+  /api/audit/logs/user/{userId}:
+    get:
+      tags:
+        - Audit
+      summary: Get audit logs by user
+      description: Retrieve all audit logs for a specific user
+      operationId: getAuditLogsByUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: User ID
+          schema:
+            type: integer
+            format: int64
+        - name: page
+          in: query
+          description: Page number (0-indexed)
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          description: Page size
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Audit logs for the user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
 # ================================================================
 # COMPONENTS
 # ================================================================
@@ -3882,3 +4153,118 @@ components:
               quantity:
                 type: integer
                 minimum: 1
+
+    # ================================================================
+    # AUDIT LOG SCHEMAS
+    # ================================================================
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Audit log unique identifier
+        entityType:
+          type: string
+          description: Type of entity (e.g., Order, Payment, Product)
+        entityId:
+          type: string
+          description: Entity identifier
+        userId:
+          type: integer
+          format: int64
+          description: User who performed the action
+        username:
+          type: string
+          description: Username of the user
+        action:
+          type: string
+          enum: [CREATE, UPDATE, DELETE]
+          description: Action performed
+        oldValues:
+          type: object
+          description: Entity values before change (for UPDATE/DELETE)
+        newValues:
+          type: object
+          description: Entity values after change (for CREATE/UPDATE)
+        status:
+          type: string
+          enum: [SUCCESS, FAILED]
+          description: Operation status
+        errorMessage:
+          type: string
+          description: Error message if operation failed
+        traceId:
+          type: string
+          description: Distributed tracing ID
+        clientId:
+          type: string
+          description: Client application ID
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when audit log was created
+
+    AuditLogResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/AuditLog'
+
+    AuditLogsResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/PageResultAuditLog'
+
+    PageResultAuditLog:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLog'
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        size:
+          type: integer
+        number:
+          type: integer
+
+    AuditStatsResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                totalLogs:
+                  type: integer
+                byEntityType:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                byAction:
+                  type: object
+                  properties:
+                    CREATE:
+                      type: integer
+                    UPDATE:
+                      type: integer
+                    DELETE:
+                      type: integer
+                byStatus:
+                  type: object
+                  properties:
+                    SUCCESS:
+                      type: integer
+                    FAILED:
+                      type: integer
