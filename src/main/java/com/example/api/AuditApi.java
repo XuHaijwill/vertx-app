@@ -2,6 +2,7 @@ package com.example.api;
 
 import com.example.core.ApiResponse;
 import com.example.core.PageResult;
+import com.example.entity.AuditLog;
 import com.example.repository.AuditRepository;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -76,7 +77,10 @@ public class AuditApi extends BaseApi {
         auditRepo.search(entityType, entityId, null, action, status, username, from, to, page, size)
             .compose(list -> {
                 return auditRepo.searchCount(entityType, entityId, null, action, status, username, from, to)
-                    .map(count -> new PageResult<JsonObject>(list, count, page, size));
+                    .map(count -> {
+                        List<JsonObject> jsonList = toJsonList(list);
+                        return new PageResult<JsonObject>(jsonList, count, page, size);
+                    });
             })
             .onSuccess(r -> ctx.json(ApiResponse.success(r.toJson()).toJson()))
             .onFailure(err -> fail(ctx, err));
@@ -92,7 +96,7 @@ public class AuditApi extends BaseApi {
         int limit = queryIntClamped(ctx, "limit", 50, 1, 200);
 
         auditRepo.findByEntity(entityType, entityId, limit)
-            .onSuccess(list -> ctx.json(ApiResponse.success(list).toJson()))
+            .onSuccess(list -> ctx.json(ApiResponse.success(toJsonList(list)).toJson()))
             .onFailure(err -> fail(ctx, err));
     }
 
@@ -106,7 +110,7 @@ public class AuditApi extends BaseApi {
 
         int limit = queryIntClamped(ctx, "limit", 50, 1, 200);
         auditRepo.findByUser(userId, limit)
-            .onSuccess(list -> ctx.json(ApiResponse.success(list).toJson()))
+            .onSuccess(list -> ctx.json(ApiResponse.success(toJsonList(list)).toJson()))
             .onFailure(err -> fail(ctx, err));
     }
 
@@ -121,7 +125,7 @@ public class AuditApi extends BaseApi {
         auditRepo.findById(id)
             .onSuccess(record -> {
                 if (record == null) notFound(ctx, "Audit log not found: " + id);
-                else ctx.json(ApiResponse.success(record).toJson());
+                else ctx.json(ApiResponse.success(record.toJson()).toJson());
             })
             .onFailure(err -> fail(ctx, err));
     }
@@ -183,6 +187,16 @@ public class AuditApi extends BaseApi {
                 ctx.json(ApiResponse.success(result).toJson());
             })
             .onFailure(err -> fail(ctx, err));
+    }
+
+    // ================================================================
+    // Helpers
+    // ================================================================
+
+    private List<JsonObject> toJsonList(List<AuditLog> list) {
+        List<JsonObject> result = new java.util.ArrayList<>();
+        for (AuditLog log : list) result.add(log.toJson());
+        return result;
     }
 
     // 使用 BaseApi 的 protected fail 方法，无需重复定义

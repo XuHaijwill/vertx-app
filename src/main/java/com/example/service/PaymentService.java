@@ -1,5 +1,6 @@
 package com.example.service;
 
+import com.example.entity.Payment;
 import com.example.core.PageResult;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
@@ -8,36 +9,40 @@ import java.util.List;
 
 /**
  * Payment Service Interface
+ *
+ * All methods that mutate data carry @Transactional semantics
+ * (handled by TransactionTemplate in the implementation).
  */
 public interface PaymentService {
 
     /**
-     * Process a payment for an order - 5 tables in one transaction
+     * Process a payment for an order — 5 tables in one transaction.
+     * Returns enriched Payment (with orderTotal, orderStatus, userName).
      */
-    Future<JsonObject> processPayment(JsonObject request);
+    Future<Payment> processPayment(JsonObject request);
 
     /**
-     * Refund a completed payment - 4 tables in one transaction
+     * Refund a completed payment — 4 tables in one transaction.
      */
-    Future<JsonObject> refundPayment(Long paymentId);
+    Future<Payment> refundPayment(Long paymentId);
 
     /**
-     * Find payment by ID
+     * Find payment by ID (with JOIN enrichment).
      */
-    Future<JsonObject> findById(Long id);
+    Future<Payment> findById(Long id);
 
     /**
-     * Find payment by order ID
+     * Find payment by order ID.
      */
-    Future<JsonObject> findByOrderId(Long orderId);
+    Future<Payment> findByOrderId(Long orderId);
 
     /**
-     * Find payments by user ID
+     * Find payments by user ID.
      */
-    Future<List<JsonObject>> findByUserId(Long userId);
+    Future<List<Payment>> findByUserId(Long userId);
 
     /**
-     * Find payments by status
+     * Find payments by status.
      */
-    Future<List<JsonObject>> findByStatus(String status);
+    Future<List<Payment>> findByStatus(String status);
 }

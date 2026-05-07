@@ -2,6 +2,7 @@ package com.example.entity;
 
 import java.time.LocalDateTime;
 import io.vertx.core.json.JsonObject;
+import io.vertx.sqlclient.Row;
 
 public class SysDictData {
     private Long dictCode;
@@ -69,6 +70,44 @@ public class SysDictData {
 
     public String getRemark() { return remark; }
     public void setRemark(String remark) { this.remark = remark; }
+
+    /** Row → SysDictData */
+    public static SysDictData toSysDictData(Row row) {
+        SysDictData d = new SysDictData();
+        d.setDictCode(row.getLong("dict_code"));
+        d.setDictSort(row.getInteger("dict_sort"));
+        d.setDictLabel(row.getString("dict_label"));
+        d.setDictValue(row.getString("dict_value"));
+        d.setDictType(row.getString("dict_type"));
+        d.setCssClass(row.getString("css_class"));
+        d.setListClass(row.getString("list_class"));
+        d.setIsDefault(row.getString("is_default"));
+        d.setStatus(row.getString("status"));
+        d.setCreateBy(row.getString("create_by"));
+        d.setCreateTime(row.getLocalDateTime("create_time"));
+        d.setUpdateBy(row.getString("update_by"));
+        d.setUpdateTime(row.getLocalDateTime("update_time"));
+        d.setRemark(row.getString("remark"));
+        return d;
+    }
+
+    /** JsonObject → SysDictData (from API request body) */
+    public static SysDictData fromJson(JsonObject json) {
+        SysDictData d = new SysDictData();
+        d.setDictCode(json.getLong("dictCode"));
+        d.setDictSort(json.getInteger("dictSort", 0));
+        d.setDictLabel(json.getString("dictLabel"));
+        d.setDictValue(json.getString("dictValue"));
+        d.setDictType(json.getString("dictType"));
+        d.setCssClass(json.getString("cssClass"));
+        d.setListClass(json.getString("listClass"));
+        d.setIsDefault(json.getString("isDefault", "N"));
+        d.setStatus(json.getString("status", "0"));
+        d.setCreateBy(json.getString("createBy", "admin"));
+        d.setUpdateBy(json.getString("updateBy"));
+        d.setRemark(json.getString("remark"));
+        return d;
+    }
 
     public JsonObject toJson() {
         JsonObject json = new JsonObject();

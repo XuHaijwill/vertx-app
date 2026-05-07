@@ -1,9 +1,19 @@
 package com.example.entity;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import io.vertx.sqlclient.Row;
 import io.vertx.core.json.JsonObject;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+/**
+ * Payment entity — corresponds to `payments` table.
+ *
+ * <p>Lifecycle: pending → completed (on success), pending → failed,
+ * completed → refunded (on refund).
+ *
+ * <p>Transient JOIN fields: orderTotal, orderStatus, userName
+ */
 public class Payment {
     private Long id;
     private Long orderId;
@@ -29,6 +39,8 @@ public class Payment {
         this.amount = amount;
         this.status = status;
     }
+
+    // ── Getters / Setters ────────────────────────────────────────────────────
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -72,6 +84,47 @@ public class Payment {
     public String getUserName() { return userName; }
     public void setUserName(String userName) { this.userName = userName; }
 
+    // ── Conversion ──────────────────────────────────────────────────────────
+
+    /** Create Payment from a database Row (with optional JOIN fields). */
+    public static Payment fromRow(Row row) {
+        if (row == null) return null;
+        Payment p = new Payment();
+        p.setId(row.getLong("id"));
+        p.setOrderId(row.getLong("order_id"));
+        p.setUserId(row.getLong("user_id"));
+        p.setAmount(row.getBigDecimal("amount"));
+        p.setMethod(row.getString("method"));
+        p.setStatus(row.getString("status"));
+        p.setTransactionNo(row.getString("transaction_no"));
+        p.setRemark(row.getString("remark"));
+        p.setCompletedAt(row.getLocalDateTime("completed_at"));
+        p.setCreatedAt(row.getLocalDateTime("created_at"));
+        p.setUpdatedAt(row.getLocalDateTime("updated_at"));
+        // JOIN fields (may be null)
+        p.setOrderTotal(row.getBigDecimal("order_total"));
+        p.setOrderStatus(row.getString("order_status"));
+        p.setUserName(row.getString("user_name"));
+        return p;
+    }
+
+    /** Create Payment from a request JSON body. */
+    public static Payment fromJson(JsonObject json) {
+        if (json == null) return null;
+        Payment p = new Payment();
+        if (json.containsKey("id")) p.setId(json.getLong("id"));
+        p.setOrderId(json.getLong("orderId"));
+        p.setUserId(json.getLong("userId"));
+        Object amountObj = json.getValue("amount");
+        p.setAmount(amountObj != null ? new BigDecimal(amountObj.toString()) : null);
+        p.setMethod(json.getString("method"));
+        p.setStatus(json.getString("status"));
+        p.setTransactionNo(json.getString("transactionNo"));
+        p.setRemark(json.getString("remark"));
+        return p;
+    }
+
+    /** Serialize to JSON for API response. Includes JOIN fields. */
     public JsonObject toJson() {
         JsonObject json = new JsonObject();
         if (id != null) json.put("id", id);

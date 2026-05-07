@@ -7,6 +7,8 @@ import com.example.db.AuditLogger;
 import com.example.db.DatabaseVerticle;
 import com.example.db.Transactional;
 import com.example.db.TxContextHolder;
+import com.example.entity.Order;
+import com.example.entity.OrderItem;
 import com.example.repository.InventoryTransactionRepository;
 import com.example.repository.OrderRepository;
 import com.example.repository.ProductRepository;
@@ -50,7 +52,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(timeoutMs = 60_000)
-    public Future<JsonObject> createOrder(JsonObject order) {
+    public Future<Order> createOrder(JsonObject order) {
         if (!dbAvailable) {
             return Future.failedFuture(BusinessException.serverError("Database not available"));
         }
@@ -99,28 +101,22 @@ public class OrderServiceImpl implements OrderService {
                         null, orderSummary)
                     .map(orderId);
             })
-            .map(orderId -> new JsonObject()
-                .put("id", orderId)
-                .put("userId", userId)
-                .put("total", orderTotal)
-                .put("remark", remark)
-                .put("status", "pending")
-                .put("itemCount", itemCount))
+            .compose(orderId -> orderRepo.findById(orderId))
             .onSuccess(result -> LOG.info("[ORDER] Created id={}, userId={}, total={}, items={}",
-                result.getLong("id"), userId, orderTotal, itemCount))
+                result.getId(), userId, orderTotal, itemCount))
             .onFailure(err -> LOG.error("[ORDER] Create failed: {}", err.getMessage()));
     }
 
     @Override
     @Transactional(timeoutMs = 30_000)
-    public Future<JsonObject> cancelOrder(Long orderId) {
+    public Future<Order> cancelOrder(Long orderId) {
         if (!dbAvailable) {
             return Future.failedFuture(BusinessException.serverError("Database not available"));
         }
 
         return orderRepo.findByIdForUpdate(orderId)
             .compose(order -> {
-                String status = order.getString("status");
+                String status = order.getStatus();
                 if ("cancelled".equals(status)) {
                     return Future.failedFuture(
                         BusinessException.conflict("Order already cancelled"));
@@ -139,8 +135,8 @@ public class OrderServiceImpl implements OrderService {
                 .compose(items -> restoreStockSequence(orderId, items, 0).map(order)))
             .compose(order -> orderRepo.updateStatus(orderId, "cancelled").map(order))
             .compose(order -> {
-                JsonObject oldVal = order.copy();
-                JsonObject newVal = order.copy().put("status", "cancelled");
+                JsonObject oldVal = order.toJson();
+                JsonObject newVal = order.toJson().put("status", "cancelled");
                 return audit.logInTx(TxContextHolder.current(),
                         AuditAction.AUDIT_UPDATE, "orders",
                         String.valueOf(orderId),
@@ -152,13 +148,13 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<Order>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(List.of());
         return orderRepo.findAll();
     }
 
     @Override
-    public Future<JsonObject> findById(Long id) {
+    public Future<Order> findById(Long id) {
         if (!dbAvailable) return Future.succeededFuture(null);
         return orderRepo.findById(id)
             .map(order -> {
@@ -168,13 +164,13 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public Future<List<JsonObject>> findByUserId(Long userId) {
+    public Future<List<Order>> findByUserId(Long userId) {
         if (!dbAvailable) return Future.succeededFuture(List.of());
         return orderRepo.findByUserId(userId);
     }
 
     @Override
-    public Future<PageResult<JsonObject>> findPaginated(int page, int size) {
+    public Future<PageResult<Order>> findPaginated(int page, int size) {
         if (!dbAvailable) {
             return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
         }
@@ -210,11 +206,11 @@ public class OrderServiceImpl implements OrderService {
             .compose(v -> deductStockSequence(orderId, items, index + 1));
     }
 
-    private Future<Void> restoreStockSequence(Long orderId, JsonArray items, int index) {
+    private Future<Void> restoreStockSequence(Long orderId, List<OrderItem> items, int index) {
         if (index >= items.size()) return Future.succeededFuture();
-        JsonObject item = items.getJsonObject(index);
-        Long productId = item.getLong("productId");
-        int quantity = item.getInteger("quantity", 1);
+        OrderItem item = items.get(index);
+        Long productId = item.getProductId();
+        int quantity = item.getQuantity();
 
         return productRepo.findByIdForUpdate(productId)
             .compose(product -> {

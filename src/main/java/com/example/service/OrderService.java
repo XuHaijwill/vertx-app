@@ -1,6 +1,7 @@
 package com.example.service;
 
 import com.example.core.PageResult;
+import com.example.entity.Order;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 
@@ -14,30 +15,30 @@ public interface OrderService {
     /**
      * Create an order with multiple items - ALL OR NOTHING transaction
      */
-    Future<JsonObject> createOrder(JsonObject order);
+    Future<Order> createOrder(JsonObject order);
 
     /**
      * Cancel an order - restore stock + update status in ONE transaction
      */
-    Future<JsonObject> cancelOrder(Long orderId);
+    Future<Order> cancelOrder(Long orderId);
 
     /**
      * Find all orders
      */
-    Future<List<JsonObject>> findAll();
+    Future<List<Order>> findAll();
 
     /**
      * Find order by ID
      */
-    Future<JsonObject> findById(Long id);
+    Future<Order> findById(Long id);
 
     /**
      * Find orders by user ID
      */
-    Future<List<JsonObject>> findByUserId(Long userId);
+    Future<List<Order>> findByUserId(Long userId);
 
     /**
      * Find orders with pagination
      */
-    Future<PageResult<JsonObject>> findPaginated(int page, int size);
+    Future<PageResult<Order>> findPaginated(int page, int size);
 }

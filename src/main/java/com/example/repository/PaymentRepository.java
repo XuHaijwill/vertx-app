@@ -3,12 +3,14 @@ package com.example.repository;
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
 import com.example.db.TxContextHolder;
+import com.example.entity.Payment;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Tuple;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -32,11 +34,49 @@ public class PaymentRepository {
         this.vertx = vertx;
     }
 
+    // ===== Entity Mapping =====
+    private Payment toPayment(JsonObject json) {
+        if (json == null) return null;
+        Payment p = new Payment();
+        p.setId((Long) json.getValue("id"));
+        p.setOrderId((Long) json.getValue("order_id"));
+        p.setUserId((Long) json.getValue("user_id"));
+        Object amountObj = json.getValue("amount");
+        p.setAmount(amountObj != null ? new BigDecimal(amountObj.toString()) : null);
+        p.setMethod(json.getString("method"));
+        p.setStatus(json.getString("status"));
+        p.setTransactionNo(json.getString("transaction_no"));
+        p.setRemark(json.getString("remark"));
+        Object completedObj = json.getValue("completed_at");
+        if (completedObj != null) {
+            p.setCompletedAt(completedObj instanceof LocalDateTime ? (LocalDateTime) completedObj : LocalDateTime.parse(completedObj.toString()));
+        }
+        Object createdObj = json.getValue("created_at");
+        if (createdObj != null) {
+            p.setCreatedAt(createdObj instanceof LocalDateTime ? (LocalDateTime) createdObj : LocalDateTime.parse(createdObj.toString()));
+        }
+        Object updatedObj = json.getValue("updated_at");
+        if (updatedObj != null) {
+            p.setUpdatedAt(updatedObj instanceof LocalDateTime ? (LocalDateTime) updatedObj : LocalDateTime.parse(updatedObj.toString()));
+        }
+        // JOIN fields
+        Object orderTotalObj = json.getValue("order_total");
+        p.setOrderTotal(orderTotalObj != null ? new BigDecimal(orderTotalObj.toString()) : null);
+        p.setOrderStatus(json.getString("order_status"));
+        p.setUserName(json.getString("user_name"));
+        return p;
+    }
+
+    private List<Payment> toPaymentList(List<JsonObject> jsonList) {
+        if (jsonList == null) return null;
+        return jsonList.stream().map(this::toPayment).collect(java.util.stream.Collectors.toList());
+    }
+
     // ================================================================
     // Pool-based queries (standalone — no transaction)
     // ================================================================
 
-    public Future<JsonObject> findById(Long id) {
+    public Future<Payment> findById(Long id) {
         String sql = "SELECT p.*, o.total as order_total, o.status as order_status, " +
             "u.name as user_name FROM payments p " +
             "LEFT JOIN orders o ON p.order_id = o.id " +
@@ -45,40 +85,40 @@ public class PaymentRepository {
         return DatabaseVerticle.query(vertx, sql, params)
             .map(rows -> {
                 List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
+                return list.isEmpty() ? null : toPayment(list.get(0));
             });
     }
 
     /**
      * Find payment by order ID (non-tx version).
      */
-    public Future<JsonObject> findByOrderId(Long orderId) {
+    public Future<Payment> findByOrderId(Long orderId) {
         String sql = "SELECT p.* FROM payments p WHERE p.order_id = $1 ORDER BY p.id DESC LIMIT 1";
         Tuple params = Tuple.tuple().addLong(orderId);
         return DatabaseVerticle.query(vertx, sql, params)
             .map(rows -> {
                 List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
+                return list.isEmpty() ? null : toPayment(list.get(0));
             });
     }
 
-    public Future<List<JsonObject>> findByUserId(Long userId) {
+    public Future<List<Payment>> findByUserId(Long userId) {
         String sql = "SELECT p.*, o.total as order_total FROM payments p " +
             "LEFT JOIN orders o ON p.order_id = o.id WHERE p.user_id = $1 " +
             "ORDER BY p.created_at DESC";
         Tuple params = Tuple.tuple().addLong(userId);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(rows -> toPaymentList(DatabaseVerticle.toJsonList(rows)));
     }
 
-    public Future<List<JsonObject>> findByStatus(String status) {
+    public Future<List<Payment>> findByStatus(String status) {
         String sql = "SELECT p.*, o.total as order_total, u.name as user_name FROM payments p " +
             "LEFT JOIN orders o ON p.order_id = o.id " +
             "LEFT JOIN users u ON p.user_id = u.id WHERE p.status = $1 " +
             "ORDER BY p.created_at DESC";
         Tuple params = Tuple.tuple().addString(status);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(rows -> toPaymentList(DatabaseVerticle.toJsonList(rows)));
     }
 
     // ================================================================
@@ -118,7 +158,7 @@ public class PaymentRepository {
      *
      * @see #findByOrderIdInTx(TransactionContext, Long)
      */
-    public Future<JsonObject> findByOrderIdForTx(Long orderId) {
+    public Future<Payment> findByOrderIdForTx(Long orderId) {
         TransactionContext tx = TxContextHolder.current();
         if (tx != null) return findByOrderIdInTx(tx, orderId);
         return DatabaseVerticle.withTransaction(vertx,
@@ -130,7 +170,7 @@ public class PaymentRepository {
      *
      * @see #findByUserIdInTx(TransactionContext, Long, int)
      */
-    public Future<List<JsonObject>> findByUserIdForTx(Long userId, int limit) {
+    public Future<List<Payment>> findByUserIdForTx(Long userId, int limit) {
         TransactionContext tx = TxContextHolder.current();
         if (tx != null) return findByUserIdInTx(tx, userId, limit);
         return DatabaseVerticle.withTransaction(vertx,
@@ -161,23 +201,25 @@ public class PaymentRepository {
     /**
      * Find payment by order ID inside a transaction — explicit context.
      */
-    public Future<JsonObject> findByOrderIdInTx(TransactionContext tx, Long orderId) {
+    public Future<Payment> findByOrderIdInTx(TransactionContext tx, Long orderId) {
         tx.tick();
         String sql = "SELECT * FROM payments WHERE order_id = $1 ORDER BY id DESC LIMIT 1";
         Tuple params = Tuple.tuple().addLong(orderId);
-        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params);
+        return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params)
+            .map(this::toPayment);
     }
 
     /**
      * List recent payments for a user inside a transaction — explicit context.
      */
-    public Future<List<JsonObject>> findByUserIdInTx(TransactionContext tx, Long userId, int limit) {
+    public Future<List<Payment>> findByUserIdInTx(TransactionContext tx, Long userId, int limit) {
         tx.tick();
         String sql = "SELECT p.*, o.total as order_total FROM payments p " +
             "LEFT JOIN orders o ON p.order_id = o.id WHERE p.user_id = $1 " +
             "ORDER BY p.created_at DESC LIMIT $2";
         Tuple params = Tuple.tuple().addLong(userId).addInteger(limit);
-        return DatabaseVerticle.queryListInTx(tx.conn(), sql, params);
+        return DatabaseVerticle.queryListInTx(tx.conn(), sql, params)
+            .map(list -> toPaymentList(list));
     }
 
     // ================================================================

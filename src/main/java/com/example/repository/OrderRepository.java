@@ -3,6 +3,8 @@ package com.example.repository;
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
 import com.example.db.TxContextHolder;
+import com.example.entity.Order;
+import com.example.entity.OrderItem;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -10,6 +12,7 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Tuple;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -36,20 +39,72 @@ public class OrderRepository {
         this.vertx = vertx;
     }
 
+    // ===== Entity Mapping =====
+    private Order toOrder(JsonObject json) {
+        if (json == null) return null;
+        Order o = new Order();
+        o.setId((Long) json.getValue("id"));
+        o.setUserId((Long) json.getValue("user_id"));
+        o.setStatus(json.getString("status"));
+        Object totalObj = json.getValue("total");
+        o.setTotal(totalObj != null ? new BigDecimal(totalObj.toString()) : null);
+        o.setRemark(json.getString("remark"));
+        Object createdObj = json.getValue("created_at");
+        if (createdObj != null) {
+            o.setCreatedAt(createdObj instanceof LocalDateTime ? (LocalDateTime) createdObj : LocalDateTime.parse(createdObj.toString()));
+        }
+        Object updatedObj = json.getValue("updated_at");
+        if (updatedObj != null) {
+            o.setUpdatedAt(updatedObj instanceof LocalDateTime ? (LocalDateTime) updatedObj : LocalDateTime.parse(updatedObj.toString()));
+        }
+        // JOIN field
+        o.setUserName(json.getString("user_name"));
+        return o;
+    }
+
+    private List<Order> toOrderList(List<JsonObject> jsonList) {
+        if (jsonList == null) return null;
+        return jsonList.stream().map(this::toOrder).collect(Collectors.toList());
+    }
+
+    private OrderItem toOrderItem(JsonObject json) {
+        if (json == null) return null;
+        OrderItem item = new OrderItem();
+        item.setId((Long) json.getValue("id"));
+        item.setOrderId((Long) json.getValue("order_id"));
+        item.setProductId((Long) json.getValue("product_id"));
+        item.setQuantity((Integer) json.getValue("quantity"));
+        Object priceObj = json.getValue("price");
+        item.setPrice(priceObj != null ? new BigDecimal(priceObj.toString()) : null);
+        Object createdObj = json.getValue("created_at");
+        if (createdObj != null) {
+            item.setCreatedAt(createdObj instanceof LocalDateTime ? (LocalDateTime) createdObj : LocalDateTime.parse(createdObj.toString()));
+        }
+        // JOIN field
+        item.setProductName(json.getString("product_name"));
+        return item;
+    }
+
+    private List<OrderItem> toOrderItemList(List<JsonObject> jsonList) {
+        if (jsonList == null) return null;
+        return jsonList.stream().map(this::toOrderItem).collect(Collectors.toList());
+    }
+
     // ================================================================
     // Pool-based queries (standalone — no transaction)
     // ================================================================
 
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<Order>> findAll() {
         String sql = "SELECT o.*, u.name as user_name FROM orders o " +
             "LEFT JOIN users u ON o.user_id = u.id ORDER BY o.id DESC";
-        return DatabaseVerticle.query(vertx, sql).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql)
+            .map(rows -> toOrderList(DatabaseVerticle.toJsonList(rows)));
     }
 
     /**
      * Find order by ID with its items attached.
      */
-    public Future<JsonObject> findById(Long id) {
+    public Future<Order> findById(Long id) {
         String sql = "SELECT o.*, u.name as user_name FROM orders o " +
             "LEFT JOIN users u ON o.user_id = u.id WHERE o.id = $1";
         Tuple params = Tuple.tuple().addLong(id);
@@ -57,23 +112,28 @@ public class OrderRepository {
             .compose(rows -> {
                 List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
                 if (list.isEmpty()) return Future.succeededFuture(null);
-                JsonObject order = list.get(0);
-                return findItemsByOrderId(id).map(items -> order.put("items", items));
+                Order order = toOrder(list.get(0));
+                return findItemsByOrderId(id).map(items -> {
+                    order.setItems(items);
+                    return order;
+                });
             });
     }
 
-    public Future<List<JsonObject>> findByUserId(Long userId) {
+    public Future<List<Order>> findByUserId(Long userId) {
         String sql = "SELECT o.*, u.name as user_name FROM orders o " +
             "LEFT JOIN users u ON o.user_id = u.id WHERE o.user_id = $1 ORDER BY o.id DESC";
         Tuple params = Tuple.tuple().addLong(userId);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> toOrderList(DatabaseVerticle.toJsonList(rows)));
     }
 
-    public Future<List<JsonObject>> findByStatus(String status) {
+    public Future<List<Order>> findByStatus(String status) {
         String sql = "SELECT o.*, u.name as user_name FROM orders o " +
             "LEFT JOIN users u ON o.user_id = u.id WHERE o.status = $1 ORDER BY o.id DESC";
         Tuple params = Tuple.tuple().addString(status);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> toOrderList(DatabaseVerticle.toJsonList(rows)));
     }
 
     public Future<Long> count() {
@@ -81,19 +141,21 @@ public class OrderRepository {
             .map(rows -> rows.iterator().next().getLong("count"));
     }
 
-    public Future<List<JsonObject>> findItemsByOrderId(Long orderId) {
+    public Future<List<OrderItem>> findItemsByOrderId(Long orderId) {
         String sql = "SELECT oi.*, p.name as product_name FROM order_items oi " +
             "LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = $1";
         Tuple params = Tuple.tuple().addLong(orderId);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> toOrderItemList(DatabaseVerticle.toJsonList(rows)));
     }
 
-    public Future<List<JsonObject>> findPaginated(int page, int size) {
+    public Future<List<Order>> findPaginated(int page, int size) {
         int offset = (page - 1) * size;
         String sql = "SELECT o.*, u.name as user_name FROM orders o " +
             "LEFT JOIN users u ON o.user_id = u.id ORDER BY o.id DESC LIMIT $1 OFFSET $2";
         Tuple params = Tuple.tuple().addInteger(size).addInteger(offset);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> toOrderList(DatabaseVerticle.toJsonList(rows)));
     }
 
     // ================================================================
@@ -106,7 +168,7 @@ public class OrderRepository {
      *
      * @see #findByIdForUpdate(TransactionContext, Long)
      */
-    public Future<JsonObject> findByIdForUpdate(Long orderId) {
+    public Future<Order> findByIdForUpdate(Long orderId) {
         TransactionContext tx = TxContextHolder.current();
         if (tx != null) return findByIdForUpdateInTx(tx, orderId);
         return DatabaseVerticle.withTransaction(vertx,
@@ -116,10 +178,10 @@ public class OrderRepository {
     /**
      * Find order items inside a transaction — auto-detects active transaction.
      *
-     * @return JsonArray (same as the explicit tx version)
+     * @return List of OrderItem
      * @see #findItemsByOrderIdInTx(TransactionContext, Long)
      */
-    public Future<JsonArray> findItemsByOrderIdForTx(Long orderId) {
+    public Future<List<OrderItem>> findItemsByOrderIdForTx(Long orderId) {
         TransactionContext tx = TxContextHolder.current();
         if (tx != null) return findItemsByOrderIdInTx(tx, orderId);
         return DatabaseVerticle.withTransaction(vertx,
@@ -180,30 +242,26 @@ public class OrderRepository {
      * <pre>
      * return orderRepo.findByIdForUpdate(tx, orderId)
      *     .compose(order -> {
-     *         if (!"pending".equals(order.getString("status")))
+     *         if (!"pending".equals(order.getStatus()))
      *             return Future.failedFuture(BusinessException.conflict("..."));
      *         return orderRepo.updateStatusInTx(tx, orderId, "paid");
      *     });
      * </pre>
      */
-    public Future<JsonObject> findByIdForUpdate(TransactionContext tx, Long orderId) {
+    public Future<Order> findByIdForUpdate(TransactionContext tx, Long orderId) {
         return findByIdForUpdateInTx(tx, orderId);
     }
 
     /**
      * Find order items inside a transaction — explicit context.
      */
-    public Future<JsonArray> findItemsByOrderIdInTx(TransactionContext tx, Long orderId) {
+    public Future<List<OrderItem>> findItemsByOrderIdInTx(TransactionContext tx, Long orderId) {
         tx.tick();
         String sql = "SELECT oi.*, p.name as product_name FROM order_items oi " +
             "LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = $1";
         Tuple params = Tuple.tuple().addLong(orderId);
         return DatabaseVerticle.queryListInTx(tx.conn(), sql, params)
-            .map(list -> {
-                JsonArray arr = new JsonArray();
-                for (JsonObject item : list) arr.add(item);
-                return arr;
-            });
+            .map(list -> toOrderItemList(list));
     }
 
     /**
@@ -239,17 +297,17 @@ public class OrderRepository {
     // Private internal implementations (called by both auto-route and explicit)
     // ================================================================
 
-    private Future<JsonObject> findByIdForUpdateInTx(TransactionContext tx, Long orderId) {
+    private Future<Order> findByIdForUpdateInTx(TransactionContext tx, Long orderId) {
         tx.tick();
         String sql = "SELECT o.*, u.name as user_name FROM orders o " +
             "LEFT JOIN users u ON o.user_id = u.id WHERE o.id = $1 FOR UPDATE";
         Tuple params = Tuple.tuple().addLong(orderId);
         return DatabaseVerticle.queryOneInTx(tx.conn(), sql, params)
-            .map(order -> {
-                if (order == null) {
+            .map(json -> {
+                if (json == null) {
                     throw new RuntimeException("Order not found: " + orderId);
                 }
-                return order;
+                return toOrder(json);
             });
     }
 

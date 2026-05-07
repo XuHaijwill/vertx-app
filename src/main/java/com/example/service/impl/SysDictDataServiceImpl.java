@@ -5,13 +5,11 @@ import com.example.core.PageResult;
 import com.example.db.AuditAction;
 import com.example.db.AuditLogger;
 import com.example.db.DatabaseVerticle;
+import com.example.entity.SysDictData;
 import com.example.repository.SysDictDataRepository;
 import com.example.service.SysDictDataService;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import io.vertx.core.json.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -19,8 +17,6 @@ import java.util.List;
  * System Dictionary Data Service Implementation
  */
 public class SysDictDataServiceImpl implements SysDictDataService {
-
-    private static final Logger LOG = LoggerFactory.getLogger(SysDictDataServiceImpl.class);
 
     private final SysDictDataRepository repo;
     private final AuditLogger audit;
@@ -32,14 +28,42 @@ public class SysDictDataServiceImpl implements SysDictDataService {
         this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
 
+    // ================================================================
+    // HELPERS
+    // ================================================================
+
+    /** create 内部执行 + 审计 */
+    private Future<SysDictData> doCreate(SysDictData dictData) {
+        return repo.create(dictData)
+            .compose(created -> audit.log(
+                    AuditAction.AUDIT_CREATE, "sys_dict_data",
+                    String.valueOf(created.getDictCode()),
+                    null, created.toJson())
+                .map(created));
+    }
+
+    /** update 内部执行 + 审计 */
+    private Future<SysDictData> doUpdate(Long id, SysDictData dictData, SysDictData existing) {
+        return repo.update(id, dictData)
+            .compose(updated -> audit.log(
+                    AuditAction.AUDIT_UPDATE, "sys_dict_data",
+                    String.valueOf(id),
+                    existing.toJson(), updated.toJson())
+                .map(updated));
+    }
+
+    // ================================================================
+    // READ
+    // ================================================================
+
     @Override
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<SysDictData>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(List.of());
         return repo.findAll();
     }
 
     @Override
-    public Future<JsonObject> findById(Long id) {
+    public Future<SysDictData> findById(Long id) {
         if (!dbAvailable) return Future.succeededFuture(null);
         return repo.findById(id)
             .map(dict -> {
@@ -49,49 +73,40 @@ public class SysDictDataServiceImpl implements SysDictDataService {
     }
 
     @Override
-    public Future<List<JsonObject>> findByDictType(String dictType) {
+    public Future<List<SysDictData>> findByDictType(String dictType) {
         if (!dbAvailable) return Future.succeededFuture(List.of());
         return repo.findByDictType(dictType);
     }
 
+    // ================================================================
+    // WRITE
+    // ================================================================
+
     @Override
-    public Future<JsonObject> create(JsonObject dictData) {
-        if (dictData == null) {
-            return Future.failedFuture(BusinessException.badRequest("Request body is required"));
-        }
-        String dictType = dictData.getString("dictType");
-        if (dictType == null || dictType.isBlank()) {
-            return Future.failedFuture(BusinessException.badRequest("dictType is required"));
-        }
+    public Future<SysDictData> create(SysDictData dictData) {
+        if (dictData == null)
+            throw BusinessException.badRequest("Request body is required");
+        if (dictData.getDictType() == null || dictData.getDictType().isBlank())
+            throw BusinessException.badRequest("dictType is required");
 
         if (!dbAvailable) {
-            return Future.succeededFuture(dictData.copy().put("dictCode", System.currentTimeMillis()));
+            return Future.succeededFuture(
+                SysDictData.fromJson(dictData.toJson().put("dictCode", System.currentTimeMillis())));
         }
-
-        return repo.create(dictData)
-            .compose(created -> audit.log(
-                    AuditAction.AUDIT_CREATE, "sys_dict_data",
-                    String.valueOf(created.getLong("dictCode")),
-                    null, created)
-                .map(created));
+        return doCreate(dictData);
     }
 
     @Override
-    public Future<JsonObject> update(Long id, JsonObject dictData) {
+    public Future<SysDictData> update(Long id, SysDictData dictData) {
         if (!dbAvailable) {
-            return Future.succeededFuture(dictData.copy().put("dictCode", id));
+            return Future.succeededFuture(
+                SysDictData.fromJson(dictData.toJson().put("dictCode", id)));
         }
         return repo.findById(id)
             .compose(existing -> {
-                if (existing == null) {
-                    return Future.<JsonObject>failedFuture(BusinessException.notFound("DictData"));
-                }
-                return repo.update(id, dictData)
-                    .compose(updated -> audit.log(
-                            AuditAction.AUDIT_UPDATE, "sys_dict_data",
-                            String.valueOf(id),
-                            existing, updated)
-                        .map(updated));
+                if (existing == null)
+                    throw BusinessException.notFound("DictData");
+                return doUpdate(id, dictData, existing);
             });
     }
 
@@ -100,15 +115,11 @@ public class SysDictDataServiceImpl implements SysDictDataService {
         if (!dbAvailable) return Future.succeededFuture();
         return repo.findById(id)
             .compose(existing -> {
-                if (existing == null) {
-                    return Future.<Void>failedFuture(BusinessException.notFound("DictData"));
-                }
+                if (existing == null)
+                    throw BusinessException.notFound("DictData");
                 return repo.delete(id)
-                    .compose(deleted -> audit.log(
-                            AuditAction.AUDIT_DELETE, "sys_dict_data",
-                            String.valueOf(id),
-                            existing, null)
-                        .mapEmpty());
+                    .compose(v -> audit.log(AuditAction.AUDIT_DELETE, "sys_dict_data",
+                        String.valueOf(id), existing.toJson(), null).mapEmpty());
             });
     }
 
@@ -118,6 +129,10 @@ public class SysDictDataServiceImpl implements SysDictDataService {
         return repo.deleteByDictType(dictType).mapEmpty();
     }
 
+    // ================================================================
+    // QUERY / COUNT
+    // ================================================================
+
     @Override
     public Future<Boolean> existsByDictTypeAndValue(String dictType, String dictValue) {
         if (!dbAvailable) return Future.succeededFuture(false);
@@ -125,20 +140,19 @@ public class SysDictDataServiceImpl implements SysDictDataService {
     }
 
     @Override
-    public Future<PageResult<JsonObject>> findPaginated(int page, int size) {
-        if (!dbAvailable) {
+    public Future<PageResult<SysDictData>> findPaginated(int page, int size) {
+        if (!dbAvailable)
             return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
-        }
         return repo.count()
             .compose(total -> repo.findPaginated(page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));
     }
 
     @Override
-    public Future<PageResult<JsonObject>> searchPaginated(String dictType, String dictLabel, String status, int page, int size) {
-        if (!dbAvailable) {
+    public Future<PageResult<SysDictData>> searchPaginated(
+            String dictType, String dictLabel, String status, int page, int size) {
+        if (!dbAvailable)
             return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
-        }
         return repo.searchCount(dictType, dictLabel, null, status)
             .compose(total -> repo.searchPaginated(dictType, dictLabel, null, status, page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));

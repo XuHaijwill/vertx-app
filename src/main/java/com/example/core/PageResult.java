@@ -39,7 +39,17 @@ public class PageResult<T> {
             for (T item : list) {
                 if (item instanceof JsonObject) arr.add((JsonObject) item);
                 else if (item instanceof JsonArray) arr.add((JsonArray) item);
-                else arr.add(item);
+                else if (item != null) {
+                    // Support entity types with a toJson() method via reflection
+                    try {
+                        java.lang.reflect.Method m = item.getClass().getMethod("toJson");
+                        Object result = m.invoke(item);
+                        if (result instanceof JsonObject) arr.add((JsonObject) result);
+                        else arr.add(item);
+                    } catch (Exception ignored) {
+                        arr.add(item);
+                    }
+                }
             }
         }
         return arr;

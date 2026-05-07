@@ -241,7 +241,6 @@ public class ProductRepository {
      * {@code @Transactional} method), uses it. Otherwise creates a short-lived
      * transaction (5s timeout).
      *
-     * @see #findByIdForUpdate(TransactionContext, Long)
      */
     public Future<Product> findByIdForUpdate(Long productId) {
         TransactionContext tx = TxContextHolder.current();
@@ -254,7 +253,6 @@ public class ProductRepository {
     /**
      * Deduct stock inside a transaction — auto-detects active transaction.
      *
-     * @see #deductStock(TransactionContext, Long, int, Long)
      */
     public Future<Integer> deductStock(Long productId, int quantity, Long orderId) {
         TransactionContext tx = TxContextHolder.current();
@@ -266,7 +264,6 @@ public class ProductRepository {
     /**
      * Restore (add back) stock inside a transaction — auto-detects active transaction.
      *
-     * @see #restoreStock(TransactionContext, Long, int, Long)
      */
     public Future<Integer> restoreStock(Long productId, int quantity, Long orderId) {
         TransactionContext tx = TxContextHolder.current();

@@ -1,9 +1,12 @@
 package com.example.repository;
 
 import com.example.db.DatabaseVerticle;
+import com.example.entity.AuditLog;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
+import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.Tuple;
 
 import java.util.List;
@@ -32,7 +35,7 @@ public class AuditRepository {
      * @param entityId    primary key
      * @param limit       max rows (1–200)
      */
-    public Future<List<JsonObject>> findByEntity(String entityType, String entityId, int limit) {
+    public Future<List<AuditLog>> findByEntity(String entityType, String entityId, int limit) {
         String sql = """
             SELECT * FROM audit_logs
             WHERE entity_type = $1 AND entity_id = $2
@@ -40,13 +43,13 @@ public class AuditRepository {
             LIMIT $3
             """;
         Tuple params = Tuple.tuple().addString(entityType).addString(String.valueOf(entityId)).addInteger(limit);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params).map(AuditLog::toList);
     }
 
     /**
      * Get audit history for a specific user.
      */
-    public Future<List<JsonObject>> findByUser(Long userId, int limit) {
+    public Future<List<AuditLog>> findByUser(Long userId, int limit) {
         String sql = """
             SELECT * FROM audit_logs
             WHERE user_id = $1
@@ -54,13 +57,13 @@ public class AuditRepository {
             LIMIT $2
             """;
         Tuple params = Tuple.tuple().addLong(userId).addInteger(limit);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params).map(AuditLog::toList);
     }
 
     /**
      * Get audit history by action type.
      */
-    public Future<List<JsonObject>> findByAction(String action, int limit) {
+    public Future<List<AuditLog>> findByAction(String action, int limit) {
         String sql = """
             SELECT * FROM audit_logs
             WHERE action = $1
@@ -68,7 +71,7 @@ public class AuditRepository {
             LIMIT $2
             """;
         Tuple params = Tuple.tuple().addString(action).addInteger(limit);
-        return DatabaseVerticle.query(vertx, sql, params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql, params).map(AuditLog::toList);
     }
 
     // ================================================================
@@ -94,7 +97,7 @@ public class AuditRepository {
      * @param page         1-based page number
      * @param size         page size (max 200)
      */
-    public Future<List<JsonObject>> search(String entityType, String entityId,
+    public Future<List<AuditLog>> search(String entityType, String entityId,
                                             Long userId, String action, String status,
                                             String username,
                                             String from, String to,
@@ -141,7 +144,7 @@ public class AuditRepository {
         sql.append(" LIMIT $").append(idx++).append(" OFFSET $").append(idx);
         params.addInteger(size).addInteger(offset);
 
-        return DatabaseVerticle.query(vertx, sql.toString(), params).map(DatabaseVerticle::toJsonList);
+        return DatabaseVerticle.query(vertx, sql.toString(), params).map(AuditLog::toList);
     }
 
     /**
@@ -196,14 +199,10 @@ public class AuditRepository {
     // Single record
     // ================================================================
 
-    public Future<JsonObject> findById(Long id) {
+    public Future<AuditLog> findById(Long id) {
         String sql = "SELECT * FROM audit_logs WHERE id = $1";
         Tuple params = Tuple.tuple().addLong(id);
-        return DatabaseVerticle.query(vertx, sql, params)
-            .map(rows -> {
-                List<JsonObject> list = DatabaseVerticle.toJsonList(rows);
-                return list.isEmpty() ? null : list.get(0);
-            });
+        return DatabaseVerticle.query(vertx, sql, params).map(AuditLog::toOne);
     }
 
     /**

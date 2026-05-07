@@ -13,16 +13,13 @@ import io.vertx.core.json.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 
-/**
- * Product Service Implementation - with PostgreSQL
- */
+/** Product Service Implementation */
 public class ProductServiceImpl implements ProductService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ProductServiceImpl.class);
-
     private final ProductRepository productRepository;
     private final AuditLogger audit;
     private final boolean dbAvailable;
@@ -31,10 +28,7 @@ public class ProductServiceImpl implements ProductService {
         this.productRepository = new ProductRepository(vertx);
         this.audit = new AuditLogger(vertx);
         this.dbAvailable = checkDbAvailability(vertx);
-        
-        if (!dbAvailable) {
-            LOG.warn("Database not available - using demo mode");
-        }
+        if (!dbAvailable) LOG.warn("Database not available - using demo mode");
     }
 
     private boolean checkDbAvailability(Vertx vertx) {
@@ -45,316 +39,227 @@ public class ProductServiceImpl implements ProductService {
         }
     }
 
+    // ── READ ────────────────────────────────────────────────────────────────
+
     @Override
-    public Future<List<JsonObject>> findAll() {
+    public Future<List<Product>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(getDemoProducts());
-        return productRepository.findAll().map(products -> { List<JsonObject> result = new java.util.ArrayList<>(); for (Product p : products) { if (p != null) result.add(p.toJson()); } return result; });
+        return productRepository.findAll();
     }
 
     @Override
-    public Future<JsonObject> findById(Long id) {
+    public Future<Product> findById(Long id) {
         if (!dbAvailable) {
-            return Future.succeededFuture(getDemoProducts().stream()
-                .filter(p -> p.getLong("id").equals(id))
-                .findFirst().orElse(null));
+            Product found = getDemoProducts().stream()
+                .filter(p -> id.equals(p.getId())).findFirst().orElse(null);
+            return Future.succeededFuture(found);
         }
         return productRepository.findById(id)
-            .map(product -> {
-                if (product == null) {
-                    throw BusinessException.notFound("Product");
-                }
-                return product != null ? product.toJson() : null;
+            .map(p -> {
+                if (p == null) throw BusinessException.notFound("Product");
+                return p;
             });
     }
 
     @Override
-    public Future<List<JsonObject>> search(String keyword, String category) {
+    public Future<List<Product>> search(String keyword, String category) {
         if (!dbAvailable) {
-            List<JsonObject> products = getDemoProducts().stream()
-                .filter(p -> "active".equals(p.getString("status")))
+            List<Product> results = getDemoProducts().stream()
+                .filter(p -> "active".equals(p.getStatus()))
+                .filter(p -> keyword == null || keyword.isBlank()
+                    || (p.getName() != null && p.getName().toLowerCase().contains(keyword.toLowerCase())))
+                .filter(p -> category == null || category.isEmpty()
+                    || category.equalsIgnoreCase(p.getCategory()))
                 .toList();
-            if (keyword != null && !keyword.isEmpty()) {
-                String lower = keyword.toLowerCase();
-                products = products.stream()
-                    .filter(p -> p.getString("name", "").toLowerCase().contains(lower))
-                    .toList();
-            }
-            if (category != null && !category.isEmpty()) {
-                products = products.stream()
-                    .filter(p -> category.equalsIgnoreCase(p.getString("category", "")))
-                    .toList();
-            }
-            return Future.succeededFuture(products);
+            return Future.succeededFuture(results);
         }
-        return productRepository.search(keyword, category).map(products -> { List<JsonObject> result = new java.util.ArrayList<>(); for (Product p : products) { if (p != null) result.add(p.toJson()); } return result; });
+        return productRepository.search(keyword, category);
     }
 
     @Override
-    public Future<JsonObject> create(Product product) {
-        if (product == null) {
+    public Future<PageResult<Product>> findPaginated(int page, int size) {
+        if (!dbAvailable) {
+            List<Product> all = getDemoProducts();
+            int start = (page - 1) * size;
+            int end = Math.min(start + size, all.size());
+            List<Product> pageData = start < all.size() ? all.subList(start, end) : List.of();
+            return Future.succeededFuture(new PageResult<>(pageData, all.size(), page, size));
+        }
+        return productRepository.count()
+            .compose(total -> productRepository.findPaginated(page, size)
+                .map(list -> new PageResult<>(list, total, page, size)));
+    }
+
+    @Override
+    public Future<PageResult<Product>> searchPaginated(String keyword, String category, int page, int size) {
+        if (!dbAvailable) {
+            List<Product> results = getDemoProducts().stream()
+                .filter(p -> "active".equals(p.getStatus()))
+                .filter(p -> keyword == null || keyword.isBlank()
+                    || (p.getName() != null && p.getName().toLowerCase().contains(keyword.toLowerCase())))
+                .filter(p -> category == null || category.isEmpty()
+                    || category.equalsIgnoreCase(p.getCategory()))
+                .toList();
+            int start = (page - 1) * size;
+            int end = Math.min(start + size, results.size());
+            List<Product> pageData = start < results.size() ? results.subList(start, end) : List.of();
+            return Future.succeededFuture(new PageResult<>(pageData, results.size(), page, size));
+        }
+        return productRepository.searchCount(keyword, category)
+            .compose(total -> productRepository.searchPaginated(keyword, category, page, size)
+                .map(list -> new PageResult<>(list, total, page, size)));
+    }
+
+    // ── WRITE ───────────────────────────────────────────────────────────────
+
+    @Override
+    public Future<Product> create(Product product) {
+        if (product == null)
             return Future.failedFuture(BusinessException.badRequest("Request body is required"));
-        }
-        String name = product.getName();
-        if (name == null || name.trim().isEmpty()) {
+        if (product.getName() == null || product.getName().trim().isEmpty())
             return Future.failedFuture(BusinessException.badRequest("Product name is required"));
-        }
-        java.math.BigDecimal price = product.getPrice();
-        if (price == null || price.doubleValue() <= 0) {
+        if (product.getPrice() == null || product.getPrice().doubleValue() <= 0)
             return Future.failedFuture(BusinessException.badRequest("Valid price is required"));
-        }
 
         if (!dbAvailable) {
-            JsonObject newProduct = product.toJson();
-            newProduct.put("id", System.currentTimeMillis());
-            return Future.succeededFuture(newProduct);
+            Product created = Product.fromJson(product.toJson().put("id", System.currentTimeMillis()));
+            return Future.succeededFuture(created);
         }
-
-        return productRepository.existsByName(name)
+        return productRepository.existsByName(product.getName())
             .compose(exists -> {
-                if (exists) {
-                    return Future.<JsonObject>failedFuture(
-                        BusinessException.conflict("Product name already exists"));
-                }
+                if (exists)
+                    return Future.<Product>failedFuture(BusinessException.conflict("Product name already exists"));
                 return productRepository.create(product)
                     .map(created -> {
-                        audit.log(AuditAction.AUDIT_CREATE, "products",
-                            String.valueOf(created.getId()),
+                        audit.log(AuditAction.AUDIT_CREATE, "products", String.valueOf(created.getId()),
                             null, created.toJson());
-                        return created.toJson();
+                        return created;
                     });
             });
     }
 
     @Override
-    public Future<JsonObject> update(Long id, Product product) {
+    public Future<Product> update(Long id, Product product) {
         if (!dbAvailable) {
-            return Future.succeededFuture(product.toJson().put("id", id));
+            return Future.succeededFuture(Product.fromJson(product.toJson().put("id", id)));
         }
         return productRepository.findById(id)
             .compose(existing -> {
-                if (existing == null) {
-                    return Future.<JsonObject>failedFuture(BusinessException.notFound("Product"));
-                }
+                if (existing == null)
+                    return Future.<Product>failedFuture(BusinessException.notFound("Product"));
                 return productRepository.update(id, product)
                     .map(updated -> {
-                        if (updated != null) {
-                            audit.log(AuditAction.AUDIT_UPDATE, "products",
-                                String.valueOf(id),
-                                existing != null ? existing.toJson() : null, updated.toJson());
-                        }
-                        return updated != null ? updated.toJson() : null;
+                        if (updated == null) throw BusinessException.notFound("Product");
+                        audit.log(AuditAction.AUDIT_UPDATE, "products", String.valueOf(id),
+                            existing.toJson(), updated.toJson());
+                        return updated;
                     });
-            })
-            .map(updated -> {
-                if (updated == null) {
-                    throw BusinessException.notFound("Product");
-                }
-                return updated;
             });
     }
 
     @Override
     public Future<Void> delete(Long id) {
-        if (!dbAvailable) {
-            return Future.succeededFuture();
-        }
+        if (!dbAvailable) return Future.succeededFuture();
         return productRepository.findById(id)
             .compose(existing -> {
-                if (existing == null) {
+                if (existing == null)
                     return Future.<Void>failedFuture(BusinessException.notFound("Product"));
-                }
                 return productRepository.delete(id)
-                    .compose(v -> audit.log(
-                            AuditAction.AUDIT_DELETE, "products",
-                            String.valueOf(id),
-                            existing != null ? existing.toJson() : null, null)
-                        .mapEmpty());
+                    .compose(v -> audit.log(AuditAction.AUDIT_DELETE, "products", String.valueOf(id),
+                        existing.toJson(), null).mapEmpty());
             });
     }
 
-    // ================================================================
-    // BATCH OPERATIONS
-    // ================================================================
+    // ── BATCH ───────────────────────────────────────────────────────────────
 
-    private static final int MAX_BATCH_SIZE = 100;
+    private static final int MAX_BATCH = 100;
+
+    private void validateBatch(List<Product> items) {
+        if (items == null || items.isEmpty())
+            throw BusinessException.badRequest("Request body must be a non-empty array");
+        if (items.size() > MAX_BATCH)
+            throw BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH);
+    }
 
     @Override
-    public Future<JsonObject> batchCreate(List<Product> products) {
-        if (products == null || products.isEmpty()) {
-            return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
-        }
-        if (products.size() > MAX_BATCH_SIZE) {
-            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
-        }
-        // Validate each product
+    public Future<List<Product>> batchCreate(List<Product> products) {
+        validateBatch(products);
         for (int i = 0; i < products.size(); i++) {
             Product p = products.get(i);
-            if (p.getName() == null || p.getName().trim().isEmpty()) {
-                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: name is required"));
-            }
-            if (p.getPrice() == null || p.getPrice().doubleValue() <= 0) {
-                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: valid price is required"));
-            }
+            if (p.getName() == null || p.getName().trim().isEmpty())
+                throw BusinessException.badRequest("Item[" + i + "]: name is required");
+            if (p.getPrice() == null || p.getPrice().doubleValue() <= 0)
+                throw BusinessException.badRequest("Item[" + i + "]: valid price is required");
         }
         if (!dbAvailable) {
-            List<JsonObject> created = products.stream().map(p -> {
-                JsonObject json = p.toJson();
-                json.put("id", System.currentTimeMillis() + products.indexOf(p));
-                return json;
-            }).toList();
-            return Future.succeededFuture(new JsonObject()
-                .put("created", created.size()).put("failed", 0)
-                .put("items", created));
+            List<Product> created = new ArrayList<>();
+            for (int i = 0; i < products.size(); i++) {
+                created.add(Product.fromJson(products.get(i).toJson()
+                    .put("id", System.currentTimeMillis() + i)));
+            }
+            return Future.succeededFuture(created);
         }
-        return productRepository.createBatch(products)
-            .map(created -> new JsonObject()
-                .put("created", created.size()).put("failed", 0)
-                .put("items", created.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList())));
+        return productRepository.createBatch(products);
     }
 
     @Override
-    public Future<JsonObject> batchUpdate(List<Product> products) {
-        if (products == null || products.isEmpty()) {
-            return Future.failedFuture(BusinessException.badRequest("Request body must be a non-empty array"));
-        }
-        if (products.size() > MAX_BATCH_SIZE) {
-            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
-        }
-        // Validate each item has id
+    public Future<List<Product>> batchUpdate(List<Product> products) {
+        validateBatch(products);
         for (int i = 0; i < products.size(); i++) {
-            if (products.get(i).getId() == null) {
-                return Future.failedFuture(BusinessException.badRequest("Item[" + i + "]: id is required"));
-            }
+            if (products.get(i).getId() == null)
+                throw BusinessException.badRequest("Item[" + i + "]: id is required");
         }
         if (!dbAvailable) {
-            return Future.succeededFuture(new JsonObject()
-                .put("updated", products.size()).put("failed", 0)
-                .put("items", products.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList())));
+            return Future.succeededFuture(products.stream()
+                .map(p -> Product.fromJson(p.toJson())).toList());
         }
-        // Sequential update (each returns updated row)
-        List<JsonObject> updated = new java.util.ArrayList<>();
+        List<Product> updated = new ArrayList<>();
         int[] failed = {0};
-        List<JsonObject> failedItems = new java.util.ArrayList<>();
-        Future<JsonObject> result = Future.succeededFuture();
+        Future<Void> chain = Future.succeededFuture();
         for (Product p : products) {
-            result = result.compose(v -> productRepository.update(p.getId(), p)
-                .onSuccess(row -> { if (row != null) updated.add(row.toJson()); })
-                .onFailure(err -> { failed[0]++; failedItems.add(p.toJson()); })
-                .mapEmpty());
+            chain = chain.compose(v -> productRepository.update(p.getId(), p)
+                .onSuccess(u -> { if (u != null) updated.add(u); })
+                .onFailure(e -> failed[0]++).mapEmpty());
         }
-        return result.map(v -> new JsonObject()
-            .put("updated", updated.size()).put("failed", failed[0])
-            .put("items", updated)
-            .put("failedItems", failedItems));
+        return chain.map(v -> updated);
     }
 
     @Override
-    public Future<JsonObject> batchDelete(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) {
+    public Future<Integer> batchDelete(List<Long> ids) {
+        if (ids == null || ids.isEmpty())
             return Future.failedFuture(BusinessException.badRequest("ids must be a non-empty array"));
-        }
-        if (ids.size() > MAX_BATCH_SIZE) {
-            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH_SIZE));
-        }
-        if (!dbAvailable) {
-            return Future.succeededFuture(new JsonObject()
-                .put("deleted", ids.size()).put("failed", 0));
-        }
-        return productRepository.deleteByIds(ids)
-            .map(deleted -> new JsonObject()
-                .put("deleted", deleted).put("failed", ids.size() - deleted));
+        if (ids.size() > MAX_BATCH)
+            return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH));
+        if (!dbAvailable) return Future.succeededFuture(ids.size());
+        return productRepository.deleteByIds(ids);
     }
 
-    // ================================================================
-    // PAGINATION
-    // ================================================================
+    // ── EXTRA ───────────────────────────────────────────────────────────────
 
-    @Override
-    public Future<PageResult<JsonObject>> findPaginated(int page, int size) {
-        if (!dbAvailable) {
-            List<JsonObject> demo = getDemoProducts();
-            int start = (page - 1) * size;
-            int end = Math.min(start + size, demo.size());
-            List<JsonObject> pageData = start < demo.size() ? demo.subList(start, end) : List.of();
-            return Future.succeededFuture(new PageResult<>(pageData, demo.size(), page, size));
-        }
-        
-        return productRepository.count()
-            .compose(total -> productRepository.findPaginated(page, size)
-                .map(list -> {
-                    List<JsonObject> jsonList = list.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList());
-                    return new PageResult<>(jsonList, total, page, size);
-                }));
-    }
-
-    @Override
-    public Future<PageResult<JsonObject>> searchPaginated(String keyword, String category, int page, int size) {
-        if (!dbAvailable) {
-            List<JsonObject> products = getDemoProducts().stream()
-                .filter(p -> "active".equals(p.getString("status")))
-                .toList();
-            if (keyword != null && !keyword.isEmpty()) {
-                String lower = keyword.toLowerCase();
-                products = products.stream()
-                    .filter(p -> p.getString("name", "").toLowerCase().contains(lower))
-                    .toList();
-            }
-            if (category != null && !category.isEmpty()) {
-                products = products.stream()
-                    .filter(p -> category.equalsIgnoreCase(p.getString("category", "")))
-                    .toList();
-            }
-            int start = (page - 1) * size;
-            int end = Math.min(start + size, products.size());
-            List<JsonObject> pageData = start < products.size() ? products.subList(start, end) : List.of();
-            return Future.succeededFuture(new PageResult<>(pageData, products.size(), page, size));
-        }
-
-        return productRepository.searchCount(keyword, category)
-            .compose(total -> productRepository.searchPaginated(keyword, category, page, size)
-                .map(list -> {
-                    List<JsonObject> jsonList = list.stream().map(Product::toJson).collect(java.util.stream.Collectors.toList());
-                    return new PageResult<>(jsonList, total, page, size);
-                }));
-    }
-
-    // ================================================================
-    // ADDITIONAL METHODS
-    // ================================================================
-
-    public Future<List<JsonObject>> findByCategory(String category) {
+    public Future<List<Product>> findByCategory(String category) {
         if (!dbAvailable) {
             return Future.succeededFuture(getDemoProducts().stream()
-                .filter(p -> category.equalsIgnoreCase(p.getString("category", "")))
-                .toList());
+                .filter(p -> category.equalsIgnoreCase(p.getCategory())).toList());
         }
-        return productRepository.findByCategory(category).map(products -> {
-            List<JsonObject> result = new java.util.ArrayList<>();
-            for (Product p : products) {
-                if (p != null) result.add(p.toJson());
-            }
-            return result;
-        });
+        return productRepository.findByCategory(category);
     }
 
-    // ================================================================
-    // DEMO DATA (when DB not available)
-    // ================================================================
+    // ── DEMO DATA ───────────────────────────────────────────────────────────
 
-    private List<JsonObject> getDemoProducts() {
+    private List<Product> getDemoProducts() {
         return List.of(
-            new JsonObject()
+            Product.fromJson(new JsonObject()
                 .put("id", 1L).put("name", "iPhone 15").put("category", "Electronics")
                 .put("price", 799.99).put("stock", 100).put("status", "active")
-                .put("description", "Apple smartphone").put("_demo", true),
-            new JsonObject()
+                .put("description", "Apple smartphone")),
+            Product.fromJson(new JsonObject()
                 .put("id", 2L).put("name", "MacBook Pro").put("category", "Electronics")
                 .put("price", 1999.99).put("stock", 50).put("status", "active")
-                .put("description", "Apple laptop").put("_demo", true),
-            new JsonObject()
+                .put("description", "Apple laptop")),
+            Product.fromJson(new JsonObject()
                 .put("id", 3L).put("name", "Coffee Maker").put("category", "Home")
                 .put("price", 49.99).put("stock", 200).put("status", "active")
-                .put("description", "Automatic coffee maker").put("_demo", true)
+                .put("description", "Automatic coffee maker"))
         );
     }
 }

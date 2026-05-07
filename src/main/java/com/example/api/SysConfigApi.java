@@ -68,9 +68,7 @@ public class SysConfigApi extends BaseApi {
     private void createConfig(RoutingContext ctx) {
         JsonObject body = ctx.body().asJsonObject();
         if (body == null) { badRequest(ctx, "Request body is required"); return; }
-        // API boundary: JsonObject → Entity
-        SysConfig entity = SysConfig.fromJson(body);
-        respondCreated(ctx, service.create(entity.toJson()));
+        respondCreated(ctx, service.create(SysConfig.fromJson(body)));
     }
 
     private void updateConfig(RoutingContext ctx) {
@@ -78,9 +76,7 @@ public class SysConfigApi extends BaseApi {
         if (id == null) { badRequest(ctx, "Invalid config ID"); return; }
         JsonObject body = ctx.body().asJsonObject();
         if (body == null) { badRequest(ctx, "Request body is required"); return; }
-        // API boundary: JsonObject → Entity
-        SysConfig entity = SysConfig.fromJson(body);
-        respond(ctx, service.update(id, entity.toJson()));
+        respond(ctx, service.update(id, SysConfig.fromJson(body)));
     }
 
     private void deleteConfig(RoutingContext ctx) {

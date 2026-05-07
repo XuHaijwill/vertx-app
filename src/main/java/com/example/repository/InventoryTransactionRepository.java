@@ -3,11 +3,13 @@ package com.example.repository;
 import com.example.db.DatabaseVerticle;
 import com.example.db.TransactionContext;
 import com.example.db.TxContextHolder;
+import com.example.entity.InventoryTransaction;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Tuple;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -32,6 +34,33 @@ public class InventoryTransactionRepository {
         this.vertx = vertx;
     }
 
+    // ===== Entity Mapping =====
+    private InventoryTransaction toInventoryTransaction(JsonObject json) {
+        if (json == null) return null;
+        InventoryTransaction it = new InventoryTransaction();
+        it.setId((Long) json.getValue("id"));
+        it.setProductId((Long) json.getValue("product_id"));
+        it.setOrderId((Long) json.getValue("order_id"));
+        it.setType(json.getString("type"));
+        it.setDelta((Integer) json.getValue("delta"));
+        it.setStockBefore((Integer) json.getValue("stock_before"));
+        it.setStockAfter((Integer) json.getValue("stock_after"));
+        it.setReason(json.getString("reason"));
+        it.setOperatorId((Long) json.getValue("operator_id"));
+        Object createdObj = json.getValue("created_at");
+        if (createdObj != null) {
+            it.setCreatedAt(createdObj instanceof LocalDateTime ? (LocalDateTime) createdObj : LocalDateTime.parse(createdObj.toString()));
+        }
+        // JOIN field
+        it.setProductName(json.getString("product_name"));
+        return it;
+    }
+
+    private List<InventoryTransaction> toInventoryTransactionList(List<JsonObject> jsonList) {
+        if (jsonList == null) return null;
+        return jsonList.stream().map(this::toInventoryTransaction).collect(java.util.stream.Collectors.toList());
+    }
+
     // ================================================================
     // Pool-based queries (standalone)
     // ================================================================
@@ -39,25 +68,25 @@ public class InventoryTransactionRepository {
     /**
      * Find transaction history for a product.
      */
-    public Future<List<JsonObject>> findByProductId(Long productId, int limit) {
+    public Future<List<InventoryTransaction>> findByProductId(Long productId, int limit) {
         String sql = "SELECT it.*, p.name as product_name FROM inventory_transactions it " +
             "LEFT JOIN products p ON it.product_id = p.id " +
             "WHERE it.product_id = $1 ORDER BY it.created_at DESC LIMIT $2";
         Tuple params = Tuple.tuple().addLong(productId).addInteger(limit);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(rows -> toInventoryTransactionList(DatabaseVerticle.toJsonList(rows)));
     }
 
     /**
      * Find transaction history for an order.
      */
-    public Future<List<JsonObject>> findByOrderId(Long orderId) {
+    public Future<List<InventoryTransaction>> findByOrderId(Long orderId) {
         String sql = "SELECT it.*, p.name as product_name FROM inventory_transactions it " +
             "LEFT JOIN products p ON it.product_id = p.id " +
             "WHERE it.order_id = $1 ORDER BY it.created_at ASC";
         Tuple params = Tuple.tuple().addLong(orderId);
         return DatabaseVerticle.query(vertx, sql, params)
-            .map(DatabaseVerticle::toJsonList);
+            .map(rows -> toInventoryTransactionList(DatabaseVerticle.toJsonList(rows)));
     }
 
     // ================================================================

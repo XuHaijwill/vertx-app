@@ -15,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * System Dictionary Type Service Implementation
@@ -37,10 +36,6 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
     // ================================================================
     // HELPERS
     // ================================================================
-
-    private static List<JsonObject> toJsonObjectList(List<SysDictType> list) {
-        return list.stream().map(SysDictType::toJson).collect(Collectors.toList());
-    }
 
     /** create/update 内部执行 + 审计，返回 SysDictType */
     private Future<SysDictType> doCreate(SysDictType dictType) {
@@ -88,7 +83,7 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
     }
 
     @Override
-    public Future<JsonObject> create(SysDictType dictType) {
+    public Future<SysDictType> create(SysDictType dictType) {
         if (dictType == null) {
             return Future.failedFuture(BusinessException.badRequest("Request body is required"));
         }
@@ -98,41 +93,43 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
         }
 
         if (!dbAvailable) {
-            return Future.succeededFuture(dictType.toJson().put("dictId", System.currentTimeMillis()));
+            dictType.setDictId(System.currentTimeMillis());
+            return Future.succeededFuture(dictType);
         }
 
         return repo.existsByDictType(type)
             .compose(exists -> {
                 if (exists) {
-                    return Future.<JsonObject>failedFuture(
+                    return Future.<SysDictType>failedFuture(
                         BusinessException.conflict("Dict type already exists: " + type));
                 }
-                return doCreate(dictType).map(SysDictType::toJson);
+                return doCreate(dictType);
             });
     }
 
     @Override
-    public Future<JsonObject> update(Long id, SysDictType dictType) {
+    public Future<SysDictType> update(Long id, SysDictType dictType) {
         if (!dbAvailable) {
-            return Future.succeededFuture(dictType.toJson().put("dictId", id));
+            dictType.setDictId(id);
+            return Future.succeededFuture(dictType);
         }
         return repo.findById(id)
             .compose((SysDictType existing) -> {
                 if (existing == null) {
-                    return Future.<JsonObject>failedFuture(BusinessException.notFound("DictType"));
+                    return Future.<SysDictType>failedFuture(BusinessException.notFound("DictType"));
                 }
                 String newType = dictType.getDictType();
                 if (newType != null && !newType.equals(existing.getDictType())) {
                     return repo.existsByDictType(newType)
                         .compose(conflict -> {
                             if (conflict) {
-                                return Future.<JsonObject>failedFuture(
+                                return Future.<SysDictType>failedFuture(
                                     BusinessException.conflict("Dict type already exists: " + newType));
                             }
-                            return doUpdate(id, dictType, existing).map(SysDictType::toJson);
+                            return doUpdate(id, dictType, existing);
                         });
                 }
-                return doUpdate(id, dictType, existing).map(SysDictType::toJson);
+                return doUpdate(id, dictType, existing);
             });
     }
 
@@ -160,23 +157,23 @@ public class SysDictTypeServiceImpl implements SysDictTypeService {
     }
 
     @Override
-    public Future<PageResult<JsonObject>> findPaginated(int page, int size) {
+    public Future<PageResult<SysDictType>> findPaginated(int page, int size) {
         if (!dbAvailable) {
             return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
         }
         return repo.count()
             .compose(total -> repo.findPaginated(page, size)
-                .map(list -> new PageResult<>(toJsonObjectList(list), total, page, size)));
+                .map(list -> new PageResult<>(list, total, page, size)));
     }
 
     @Override
-    public Future<PageResult<JsonObject>> searchPaginated(String dictName, String dictType, String status, int page, int size) {
+    public Future<PageResult<SysDictType>> searchPaginated(String dictName, String dictType, String status, int page, int size) {
         if (!dbAvailable) {
             return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
         }
         return repo.searchCount(dictName, dictType, status)
             .compose(total -> repo.searchPaginated(dictName, dictType, status, page, size)
-                .map(list -> new PageResult<>(toJsonObjectList(list), total, page, size)));
+                .map(list -> new PageResult<>(list, total, page, size)));
     }
 
     @Override

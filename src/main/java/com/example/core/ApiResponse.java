@@ -1,6 +1,9 @@
 package com.example.core;
 
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+
+import java.util.List;
 
 /**
  * Unified API Response Wrapper
@@ -149,7 +152,7 @@ public class ApiResponse {
         String kDur = keys.getOrDefault("duration", "duration");
 
         json.put(kCode, code).put(kMsg, message).put(kTs, timestamp);
-        if (data != null) json.put(kData, data);
+        if (data != null) json.put(kData, serializeData(data));
         if (duration > 0) json.put(kDur, duration);
         // Merge all extra custom fields
         for (String k : extra.fieldNames()) {
@@ -162,6 +165,35 @@ public class ApiResponse {
      * Configure response key mapping from application config. Expecting config
      * structure: response: { keys: { code: "status", message: "msg", data: "payload" } }
      */
+    /**
+     * Serialize data to a JSON-compatible value.
+     * Handles entity types with a toJson() method (via reflection).
+     * Vert.x JsonObject.put(Object) already handles List/Set of primitives,
+     * but NOT List<Entity> — we fix that here.
+     */
+    private Object serializeData(Object data) {
+        if (data instanceof List list) {
+            JsonArray arr = new JsonArray();
+            for (Object item : list) {
+                if (item instanceof JsonObject || item instanceof JsonArray) arr.add(item);
+                else if (item != null) {
+                    try {
+                        java.lang.reflect.Method m = item.getClass().getMethod("toJson");
+                        Object result = m.invoke(item);
+                        if (result instanceof JsonObject) arr.add((JsonObject) result);
+                        else arr.add(item);
+                    } catch (Exception ignored) {
+                        arr.add(item);
+                    }
+                } else {
+                    arr.addNull();
+                }
+            }
+            return arr;
+        }
+        return data;
+    }
+
     public static void configure(io.vertx.core.json.JsonObject config) {
         if (config == null) return;
         io.vertx.core.json.JsonObject resp = config.getJsonObject("response");
