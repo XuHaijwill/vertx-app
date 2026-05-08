@@ -300,6 +300,144 @@ public class SysMenuRepository {
     }
 
     // ================================================================
+    // ROLE-BASED & USER-BASED QUERIES
+    // ================================================================
+
+    /**
+     * Get all unique permission strings (perms column) from all menus.
+     * Equivalent to: selectMenuPerms()
+     */
+    public Future<List<String>> findAllPerms() {
+        String sql = "SELECT DISTINCT perms FROM sys_menu WHERE perms IS NOT NULL AND perms != ''";
+        return DatabaseVerticle.query(vertx, sql).map(rows -> {
+            List<String> perms = new ArrayList<>();
+            for (Row row : rows) {
+                String p = row.getString("perms");
+                if (p != null && !p.isEmpty()) perms.add(p);
+            }
+            return perms;
+        });
+    }
+
+    /**
+     * Get permission strings for a specific role (via sys_role_menu join).
+     * Equivalent to: selectMenuPermsByRoleId(roleId)
+     */
+    public Future<List<String>> findPermsByRoleId(Long roleId) {
+        String sql = """
+            SELECT DISTINCT m.perms
+            FROM sys_menu m
+            INNER JOIN sys_role_menu rm ON m.menu_id = rm.menu_id
+            WHERE rm.role_id = $1 AND m.perms IS NOT NULL AND m.perms != ''
+            """;
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(roleId)).map(rows -> {
+            List<String> perms = new ArrayList<>();
+            for (Row row : rows) {
+                String p = row.getString("perms");
+                if (p != null && !p.isEmpty()) perms.add(p);
+            }
+            return perms;
+        });
+    }
+
+    /**
+     * Get permission strings for a specific user (via user→role→menu chain).
+     * Equivalent to: selectMenuPermsByUserId(userId)
+     */
+    public Future<List<String>> findPermsByUserId(Long userId) {
+        String sql = """
+            SELECT DISTINCT m.perms
+            FROM sys_menu m
+            INNER JOIN sys_role_menu rm ON m.menu_id = rm.menu_id
+            INNER JOIN sys_user_role ur ON rm.role_id = ur.role_id
+            WHERE ur.user_id = $1 AND m.perms IS NOT NULL AND m.perms != ''
+            """;
+        return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(userId)).map(rows -> {
+            List<String> perms = new ArrayList<>();
+            for (Row row : rows) {
+                String p = row.getString("perms");
+                if (p != null && !p.isEmpty()) perms.add(p);
+            }
+            return perms;
+        });
+    }
+
+    /**
+     * Get menu IDs for a specific role, optionally respecting tree strictness.
+     * Equivalent to: selectMenuListByRoleId(roleId, menuCheckStrictly)
+     * @param roleId      role ID
+     * @param menuCheckStrictly if true, only menus directly assigned to this role;
+     *                          if false, include child menus of assigned parent menus
+     */
+    public Future<List<Long>> findMenuIdsByRoleId(Long roleId, boolean menuCheckStrictly) {
+        if (menuCheckStrictly) {
+            String sql = "SELECT menu_id FROM sys_role_menu WHERE role_id = $1";
+            return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(roleId)).map(rows -> {
+                List<Long> ids = new ArrayList<>();
+                for (Row row : rows) ids.add(row.getLong("menu_id"));
+                return ids;
+            });
+        } else {
+            // Non-strict: include child menus under assigned parent menus
+            String sql = """
+                SELECT DISTINCT m.menu_id
+                FROM sys_menu m
+                INNER JOIN sys_role_menu rm ON m.menu_id = rm.menu_id
+                WHERE rm.role_id = $1
+                UNION
+                SELECT m.menu_id
+                FROM sys_menu m
+                WHERE m.parent_id IN (
+                    SELECT rm2.menu_id FROM sys_role_menu rm2 WHERE rm2.role_id = $1
+                )
+                """;
+            return DatabaseVerticle.query(vertx, sql, Tuple.tuple().addLong(roleId)).map(rows -> {
+                List<Long> ids = new ArrayList<>();
+                for (Row row : rows) ids.add(row.getLong("menu_id"));
+                return ids;
+            });
+        }
+    }
+
+    /**
+     * Find menus by path or routeName (used for uniqueness validation).
+     * Equivalent to: selectMenusByPathOrRouteName(path, routeName)
+     */
+    public Future<List<SysMenu>> findByPathOrRouteName(String path, String routeName) {
+        if ((path == null || path.isEmpty()) && (routeName == null || routeName.isEmpty())) {
+            return Future.succeededFuture(new ArrayList<>());
+        }
+        StringBuilder sql = new StringBuilder("SELECT * FROM sys_menu WHERE 1=1");
+        Tuple params = Tuple.tuple();
+        int idx = 1;
+
+        if (path != null && !path.isEmpty()) {
+            sql.append(" AND path = $").append(idx++);
+            params.addString(path);
+        }
+        if (routeName != null && !routeName.isEmpty()) {
+            sql.append(" AND route_name = $").append(idx++);
+            params.addString(routeName);
+        }
+        return DatabaseVerticle.query(vertx, sql.toString(), params).map(this::toMenuList);
+    }
+
+    /**
+     * Update only the sort order of a menu (lightweight partial update).
+     * Equivalent to: updateMenuSort(menu)
+     */
+    public Future<Boolean> updateSort(Long menuId, Integer orderNum, String updateBy) {
+        String sql = """
+            UPDATE sys_menu
+            SET order_num = $2, update_by = $3, update_time = CURRENT_TIMESTAMP
+            WHERE menu_id = $1
+            """;
+        return DatabaseVerticle.query(vertx, sql,
+                Tuple.tuple().addLong(menuId).addInteger(orderNum).addString(updateBy))
+            .map(rows -> rows.rowCount() > 0);
+    }
+
+    // ================================================================
     // PAGINATION
     // ================================================================
 

@@ -2,8 +2,11 @@ package com.example.api;
 
 import com.example.core.PageResult;
 import com.example.entity.SysDictType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.example.service.SysDictTypeService;
 import com.example.service.impl.SysDictTypeServiceImpl;
+import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -17,6 +20,8 @@ import java.util.List;
  * SysDictType API - REST endpoints for dictionary type management
  */
 public class SysDictTypeApi extends BaseApi {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SysDictTypeApi.class);
 
     private final SysDictTypeService service;
 
@@ -33,6 +38,8 @@ public class SysDictTypeApi extends BaseApi {
         router.post(contextPath + "/api/dict-types").handler(this::createDictType);
         router.put(contextPath + "/api/dict-types/:id").handler(this::updateDictType);
         router.delete(contextPath + "/api/dict-types/:id").handler(this::deleteDictType);
+        router.delete(contextPath + "/api/dict-types/refreshCache").handler(this::refreshCache);
+        router.get(contextPath + "/api/dict-types/optionselect").handler(this::optionselect);
     }
 
     // ================================================================
@@ -97,11 +104,51 @@ public class SysDictTypeApi extends BaseApi {
     }
 
     private void deleteDictType(RoutingContext ctx) {
-        Long id = parseId(ctx.pathParam("id"));
-        if (id == null) {
+        String idsParam = ctx.pathParam("id");
+        if (idsParam == null || idsParam.isBlank()) {
             badRequest(ctx, "Invalid dictionary type ID");
             return;
         }
-        respondDeleted(ctx, service.delete(id));
+
+        // 支持批量删除：逗号分隔的 ID 列表
+        String[] idStrs = idsParam.split(",");
+        List<Future<Void>> futures = new ArrayList<>();
+        for (String idStr : idStrs) {
+            Long id = parseId(idStr.trim());
+            if (id != null) {
+                futures.add(service.delete(id));
+            }
+        }
+
+        if (futures.isEmpty()) {
+            badRequest(ctx, "No valid ID provided");
+            return;
+        }
+
+        io.vertx.core.Future.all(futures).onComplete(ar -> {
+            if (ar.succeeded()) {
+                ok(ctx, new JsonObject().put("msg", "delete success"));
+            } else {
+                fail(ctx, new Exception("Delete failed"));
+            }
+        });
+    }
+
+    private void refreshCache(RoutingContext ctx) {
+        // 字典缓存刷新：重新加载所有字典类型到内存
+        service.findAll().onComplete(ar -> {
+            if (ar.succeeded()) {
+                List<SysDictType> all = ar.result();
+                LOG.info("Dictionary cache refreshed, {} types loaded", all.size());
+                ok(ctx, new JsonObject().put("msg", "refresh success").put("count", all.size()));
+            } else {
+                fail(ctx, ar.cause());
+            }
+        });
+    }
+
+    private void optionselect(RoutingContext ctx) {
+        // 获取所有字典类型（不分页），供下拉框使用
+        respond(ctx, service.findAll());
     }
 }

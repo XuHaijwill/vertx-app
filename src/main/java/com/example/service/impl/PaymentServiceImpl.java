@@ -24,7 +24,7 @@ import java.util.List;
 /**
  * Payment Service Implementation — 5-table / 4-table multi-Repository declarative transactions.
  */
-public class PaymentServiceImpl implements PaymentService {
+public class PaymentServiceImpl  implements PaymentService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PaymentServiceImpl.class);
 
@@ -33,27 +33,16 @@ public class PaymentServiceImpl implements PaymentService {
     private final UserRepository userRepo;
     private final ProductRepository productRepo;
     private final InventoryTransactionRepository invTxRepo;
-    private final AuditLogger audit;
-    private final Vertx vertx;
-    private final boolean dbAvailable;
-
     public PaymentServiceImpl(Vertx vertx) {
-        this.vertx = vertx;
         this.paymentRepo = new PaymentRepository(vertx);
         this.orderRepo = new OrderRepository(vertx);
         this.userRepo = new UserRepository(vertx);
         this.productRepo = new ProductRepository(vertx);
         this.invTxRepo = new InventoryTransactionRepository(vertx);
-        this.audit = new AuditLogger(vertx);
-        this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
-
     @Override
     @Transactional(timeoutMs = 30_000)
     public Future<Payment> processPayment(JsonObject request) {
-        if (!dbAvailable) {
-            return Future.failedFuture(BusinessException.serverError("Database not available"));
-        }
 
         Long orderId = request.getLong("orderId");
         String method = request.getString("method", "balance");
@@ -107,8 +96,6 @@ public class PaymentServiceImpl implements PaymentService {
                 .compose(payment -> paymentRepo.updatePaymentStatus(payment.getId(), "completed").map(payment))
                 .map(order))
             .compose(order -> orderRepo.updateStatus(orderId, "completed").map(order))
-            .compose(order -> audit.log(AuditAction.AUDIT_CREATE, "payments",
-                    String.valueOf(orderId), null, null).map(order))
             .compose(order -> confirmStockAndLedger(orderId).map(order))
             .compose(order -> {
                 Long userId = order.getUserId();
@@ -126,9 +113,6 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional(timeoutMs = 20_000)
     public Future<Payment> refundPayment(Long paymentId) {
-        if (!dbAvailable) {
-            return Future.failedFuture(BusinessException.serverError("Database not available"));
-        }
 
         return lockPaymentForUpdate(paymentId)
             .compose(payment -> {
@@ -161,12 +145,7 @@ public class PaymentServiceImpl implements PaymentService {
                 Long orderId = payment.getOrderId();
                 return orderRepo.updateStatus(orderId, "refunded").map(payment);
             })
-            .compose(payment -> {
-                JsonObject oldVal = payment.toJson();
-                JsonObject newVal = oldVal.copy().put("status", "refunded");
-                return audit.log(AuditAction.AUDIT_UPDATE, "payments",
-                    String.valueOf(paymentId), oldVal, newVal).map(payment);
-            })
+            .compose(payment -> Future.succeededFuture(payment))
             .compose(payment -> findPaymentEnriched(paymentId)
                 .recover(err -> Future.succeededFuture(payment)))
             .onSuccess(result -> LOG.info("[PAY] Refunded: paymentId={}", paymentId))
@@ -175,7 +154,6 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     public Future<Payment> findById(Long id) {
-        if (!dbAvailable) return Future.succeededFuture(null);
         return paymentRepo.findById(id)
             .map(p -> {
                 if (p == null) throw BusinessException.notFound("Payment");
@@ -185,19 +163,16 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     public Future<Payment> findByOrderId(Long orderId) {
-        if (!dbAvailable) return Future.succeededFuture(null);
         return paymentRepo.findByOrderId(orderId);
     }
 
     @Override
     public Future<List<Payment>> findByUserId(Long userId) {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
         return paymentRepo.findByUserId(userId);
     }
 
     @Override
     public Future<List<Payment>> findByStatus(String status) {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
         return paymentRepo.findByStatus(status);
     }
 

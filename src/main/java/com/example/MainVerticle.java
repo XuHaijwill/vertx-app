@@ -6,6 +6,7 @@ import com.example.auth.KeycloakAuthHandler;
 import com.example.cache.TokenCacheManager;
 import com.example.core.ApiResponse;
 import com.example.core.Config;
+import com.example.handlers.ErrorHandler;
 import com.example.verticles.SchedulerVerticle;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
@@ -172,25 +173,17 @@ public class MainVerticle extends AbstractVerticle {
         LOG.info("[AUTH] Authentication enabled �?issuer={}, clientId={}",
                 authConfig.getIssuer(), authConfig.getClientId());
 
-        // Paths that skip authentication (加上 context-path 前缀)
+        // Paths that skip authentication
+        // Only public docs/health endpoints and the auth public-key endpoint.
+        // All business APIs (/api/*) require a valid JWT.
+        // For truly public endpoints (e.g. frontend nav menus), use RequirePermission.publicAccess() in the route handler instead of whitelisting here.
         Set<String> skipPaths = new HashSet<>(java.util.Arrays.asList(
                 contextPath + "/health",
                 contextPath + "/health/",
                 contextPath + "/docs",
                 contextPath + "/swagger-ui/",
                 contextPath + "/openapi.yaml",
-                contextPath + "/api/auth/config",
-                contextPath + "/api/info",
-                // User API 白名单（方便测试            contextPath + "/api/users",
-                contextPath + "/api/users",
-                contextPath + "/api/users/",
-                contextPath + "/api/products",
-                contextPath + "/api/products/",
-                contextPath + "/api/sys-configs",
-                contextPath + "/api/sys-configs/",
-                contextPath + "/api/menus",
-                contextPath + "/api/menus/"
-
+                contextPath + "/api/auth/config"
         ));
 
         return KeycloakAuthHandler.create(vertx, authConfig, skipPaths)
@@ -269,12 +262,8 @@ public class MainVerticle extends AbstractVerticle {
     // ================================================================
 
     private void addErrorHandlers(Router router) {
-        router.errorHandler(404, ctx ->
-                ctx.json(ApiResponse.error("NOT_FOUND", "Endpoint not found: " + ctx.request().path()).toJson()));
-        router.errorHandler(500, ctx -> {
-            LOG.error("500 Error", ctx.failure());
-            ctx.json(ApiResponse.error("INTERNAL_ERROR", "Internal server error").toJson());
-        });
+        router.errorHandler(404, ErrorHandler::notFound);
+        router.errorHandler(500, ErrorHandler::internalError);
     }
 
     // ================================================================

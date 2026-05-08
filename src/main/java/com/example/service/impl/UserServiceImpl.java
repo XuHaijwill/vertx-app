@@ -3,7 +3,6 @@ package com.example.service.impl;
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
 import com.example.db.AuditAction;
-import com.example.db.AuditLogger;
 import com.example.entity.User;
 import com.example.repository.UserRepository;
 import com.example.service.UserService;
@@ -18,32 +17,13 @@ import java.util.List;
 /**
  * User Service Implementation - entity-based, type-safe.
  */
-public class UserServiceImpl implements UserService {
+public class UserServiceImpl extends BaseServiceImpl<UserRepository> implements UserService {
 
     private static final Logger LOG = LoggerFactory.getLogger(UserServiceImpl.class);
 
-    private final UserRepository userRepository;
-    private final AuditLogger audit;
-    private final boolean dbAvailable;
+    public UserServiceImpl(Vertx vertx) { super(vertx, UserRepository::new); }
 
-    public UserServiceImpl(Vertx vertx) {
-        this.userRepository = new UserRepository(vertx);
-        this.audit = new AuditLogger(vertx);
-        this.dbAvailable = checkDbAvailability(vertx);
-        if (!dbAvailable) {
-            LOG.warn("Database not available - using demo mode");
-        }
-    }
-
-    private boolean checkDbAvailability(Vertx vertx) {
-        try {
-            return com.example.db.DatabaseVerticle.getPool(vertx) != null;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    // ── Entity → API JSON ───────────────────────────────────────────────────
+    // ── Entity ->API JSON ───────────────────────────────────────────────────
 
     private List<JsonObject> usersToJson(List<User> users) {
         return users.stream().map(User::toJson).toList();
@@ -57,14 +37,14 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Future<List<User>> findAll() {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
-        return userRepository.findAll();
+        if (!dbAvailable) return failIfUnavailable();
+        return repo.findAll();
     }
 
     @Override
     public Future<User> findById(Long id) {
-        if (!dbAvailable) return Future.succeededFuture(null);
-        return userRepository.findById(id)
+        if (!dbAvailable) return failIfUnavailableNull();
+        return repo.findById(id)
             .map(user -> {
                 if (user == null) throw BusinessException.notFound("User");
                 return user;
@@ -73,8 +53,8 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Future<List<User>> search(String keyword) {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
-        return userRepository.search(keyword);
+        if (!dbAvailable) return failIfUnavailable();
+        return repo.search(keyword);
     }
 
     @Override
@@ -90,13 +70,13 @@ public class UserServiceImpl implements UserService {
             user.setId(System.currentTimeMillis());
             return Future.succeededFuture(user);
         }
-        return userRepository.existsByEmail(email)
+        return repo.existsByEmail(email)
             .compose(exists -> {
                 if (exists) {
                     return Future.<User>failedFuture(
                         BusinessException.conflict("Email already exists"));
                 }
-                return userRepository.create(user);
+                return repo.create(user);
             })
             .compose(created ->
                 audit.log(AuditAction.AUDIT_CREATE, "users",
@@ -110,27 +90,27 @@ public class UserServiceImpl implements UserService {
             user.setId(id);
             return Future.succeededFuture(user);
         }
-        return userRepository.findById(id)
+        return repo.findById(id)
             .compose(existing -> {
                 if (existing == null) {
                     return Future.<User>failedFuture(BusinessException.notFound("User"));
                 }
                 String newEmail = user.getEmail();
                 if (newEmail != null && !newEmail.equals(existing.getEmail())) {
-                    return userRepository.existsByEmail(newEmail)
+                    return repo.existsByEmail(newEmail)
                         .compose(emailExists -> {
                             if (emailExists) {
                                 return Future.<User>failedFuture(
                                     BusinessException.conflict("Email already exists"));
                             }
-                            return userRepository.update(id, user);
+                            return repo.update(id, user);
                         });
                 }
-                return userRepository.update(id, user);
+                return repo.update(id, user);
             })
             .compose(updated -> {
                 if (updated == null) throw BusinessException.notFound("User");
-                return userRepository.findById(id)
+                return repo.findById(id)
                     .compose(before ->
                         audit.log(AuditAction.AUDIT_UPDATE, "users",
                             String.valueOf(id),
@@ -143,12 +123,12 @@ public class UserServiceImpl implements UserService {
     @Override
     public Future<Void> delete(Long id) {
         if (!dbAvailable) return Future.succeededFuture();
-        return userRepository.findById(id)
+        return repo.findById(id)
             .compose(existing -> {
                 if (existing == null) {
                     return Future.<Void>failedFuture(BusinessException.notFound("User"));
                 }
-                return userRepository.delete(id)
+                return repo.delete(id)
                     .compose(v ->
                         audit.log(AuditAction.AUDIT_DELETE, "users",
                             String.valueOf(id), existing.toJson(), null)
@@ -159,7 +139,7 @@ public class UserServiceImpl implements UserService {
     @Override
     public Future<Boolean> exists(String email) {
         if (!dbAvailable) return Future.succeededFuture(false);
-        return userRepository.existsByEmail(email);
+        return repo.existsByEmail(email);
     }
 
     // ── Batch ──────────────────────────────────────────────────────────────
@@ -191,7 +171,7 @@ public class UserServiceImpl implements UserService {
             users.forEach(u -> u.setId(System.currentTimeMillis()));
             return Future.succeededFuture(new BatchResult<>(users, users.size(), 0, 0, 0));
         }
-        return userRepository.createBatch(users)
+        return repo.createBatch(users)
             .map(created -> new BatchResult<>(created, created.size(), 0, 0, 0));
     }
 
@@ -219,7 +199,7 @@ public class UserServiceImpl implements UserService {
         Future<Void> chain = Future.succeededFuture();
         for (User u : users) {
             chain = chain
-                .compose(v -> userRepository.update(u.getId(), u))
+                .compose(v -> repo.update(u.getId(), u))
                 .onSuccess(updated::add)
                 .onFailure(err -> failed[0]++)
                 .mapEmpty();
@@ -238,24 +218,24 @@ public class UserServiceImpl implements UserService {
                 BusinessException.badRequest("Batch size exceeds " + MAX_BATCH_SIZE));
         }
         if (!dbAvailable) return Future.succeededFuture(ids.size());
-        return userRepository.deleteByIds(ids);
+        return repo.deleteByIds(ids);
     }
 
     // ── Pagination ─────────────────────────────────────────────────────────
 
     @Override
     public Future<PageResult<User>> findPaginated(int page, int size) {
-        if (!dbAvailable) return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
-        return userRepository.count()
-            .compose(total -> userRepository.findPaginated(page, size)
+        if (!dbAvailable) return failIfUnavailableNull();
+        return repo.count()
+            .compose(total -> repo.findPaginated(page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));
     }
 
     @Override
     public Future<PageResult<User>> searchPaginated(String keyword, int page, int size) {
-        if (!dbAvailable) return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
-        return userRepository.searchCount(keyword)
-            .compose(total -> userRepository.searchPaginated(keyword, page, size)
+        if (!dbAvailable) return failIfUnavailableNull();
+        return repo.searchCount(keyword)
+            .compose(total -> repo.searchPaginated(keyword, page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));
     }
 
@@ -263,13 +243,13 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Future<List<User>> findByDepartment(String department) {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
-        return userRepository.findByDepartment(department);
+        if (!dbAvailable) return failIfUnavailable();
+        return repo.findByDepartment(department);
     }
 
     @Override
     public Future<List<User>> findByStatus(String status) {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
-        return userRepository.findByStatus(status);
+        if (!dbAvailable) return failIfUnavailable();
+        return repo.findByStatus(status);
     }
 }

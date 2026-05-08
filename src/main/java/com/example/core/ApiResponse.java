@@ -191,6 +191,21 @@ public class ApiResponse {
             }
             return arr;
         }
+        return serializeNonList(data);
+    }
+
+    /**
+     * Serialize a single non-list value to JSON.
+     * Tries toJson() via reflection for entity types, otherwise returns as-is.
+     */
+    private Object serializeNonList(Object data) {
+        if (data == null) return null;
+        if (data instanceof JsonObject || data instanceof JsonArray) return data;
+        try {
+            java.lang.reflect.Method m = data.getClass().getMethod("toJson");
+            Object result = m.invoke(data);
+            if (result instanceof JsonObject) return (JsonObject) result;
+        } catch (Exception ignored) { }
         return data;
     }
 

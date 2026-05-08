@@ -3,8 +3,6 @@ package com.example.service.impl;
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
 import com.example.db.AuditAction;
-import com.example.db.AuditLogger;
-import com.example.db.DatabaseVerticle;
 import com.example.entity.SysConfig;
 import com.example.repository.SysConfigRepository;
 import com.example.service.SysConfigService;
@@ -16,17 +14,9 @@ import java.util.List;
 /**
  * System Config Service Implementation
  */
-public class SysConfigServiceImpl implements SysConfigService {
+public class SysConfigServiceImpl extends BaseServiceImpl<SysConfigRepository> implements SysConfigService {
 
-    private final SysConfigRepository repo;
-    private final AuditLogger audit;
-    private final boolean dbAvailable;
-
-    public SysConfigServiceImpl(Vertx vertx) {
-        this.repo = new SysConfigRepository(vertx);
-        this.audit = new AuditLogger(vertx);
-        this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
-    }
+    public SysConfigServiceImpl(Vertx vertx) { super(vertx, SysConfigRepository::new); }
 
     // ================================================================
     // READ
@@ -34,13 +24,13 @@ public class SysConfigServiceImpl implements SysConfigService {
 
     @Override
     public Future<List<SysConfig>> findAll() {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
+        if (!dbAvailable) return failIfUnavailable();
         return repo.findAll();
     }
 
     @Override
     public Future<SysConfig> findById(Long id) {
-        if (!dbAvailable) return Future.succeededFuture(null);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.findById(id)
             .map(c -> {
                 if (c == null) throw BusinessException.notFound("Config");
@@ -50,13 +40,13 @@ public class SysConfigServiceImpl implements SysConfigService {
 
     @Override
     public Future<SysConfig> findByConfigKey(String configKey) {
-        if (!dbAvailable) return Future.succeededFuture(null);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.findByConfigKey(configKey);
     }
 
     @Override
     public Future<String> getConfigValue(String configKey) {
-        if (!dbAvailable) return Future.succeededFuture(null);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.findByConfigKey(configKey)
             .map(c -> c != null ? c.getConfigValue() : null);
     }
@@ -144,7 +134,7 @@ public class SysConfigServiceImpl implements SysConfigService {
 
     @Override
     public Future<Boolean> existsByConfigKey(String configKey) {
-        if (!dbAvailable) return Future.succeededFuture(false);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.existsByConfigKey(configKey);
     }
 
@@ -169,7 +159,7 @@ public class SysConfigServiceImpl implements SysConfigService {
 
     @Override
     public Future<Long> count() {
-        if (!dbAvailable) return Future.succeededFuture(0L);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.count().map(c -> c.longValue());
     }
 }

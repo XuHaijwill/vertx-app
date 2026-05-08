@@ -3,8 +3,6 @@ package com.example.service.impl;
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
 import com.example.db.AuditAction;
-import com.example.db.AuditLogger;
-import com.example.db.DatabaseVerticle;
 import com.example.entity.SysDictData;
 import com.example.repository.SysDictDataRepository;
 import com.example.service.SysDictDataService;
@@ -16,17 +14,9 @@ import java.util.List;
 /**
  * System Dictionary Data Service Implementation
  */
-public class SysDictDataServiceImpl implements SysDictDataService {
+public class SysDictDataServiceImpl extends BaseServiceImpl<SysDictDataRepository> implements SysDictDataService {
 
-    private final SysDictDataRepository repo;
-    private final AuditLogger audit;
-    private final boolean dbAvailable;
-
-    public SysDictDataServiceImpl(Vertx vertx) {
-        this.repo = new SysDictDataRepository(vertx);
-        this.audit = new AuditLogger(vertx);
-        this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
-    }
+    public SysDictDataServiceImpl(Vertx vertx) { super(vertx, SysDictDataRepository::new); }
 
     // ================================================================
     // HELPERS
@@ -58,13 +48,13 @@ public class SysDictDataServiceImpl implements SysDictDataService {
 
     @Override
     public Future<List<SysDictData>> findAll() {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
+        if (!dbAvailable) return failIfUnavailable();
         return repo.findAll();
     }
 
     @Override
     public Future<SysDictData> findById(Long id) {
-        if (!dbAvailable) return Future.succeededFuture(null);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.findById(id)
             .map(dict -> {
                 if (dict == null) throw BusinessException.notFound("DictData");
@@ -74,7 +64,7 @@ public class SysDictDataServiceImpl implements SysDictDataService {
 
     @Override
     public Future<List<SysDictData>> findByDictType(String dictType) {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
+        if (!dbAvailable) return failIfUnavailable();
         return repo.findByDictType(dictType);
     }
 
@@ -135,7 +125,7 @@ public class SysDictDataServiceImpl implements SysDictDataService {
 
     @Override
     public Future<Boolean> existsByDictTypeAndValue(String dictType, String dictValue) {
-        if (!dbAvailable) return Future.succeededFuture(false);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.existsByDictTypeAndValue(dictType, dictValue);
     }
 
@@ -160,7 +150,19 @@ public class SysDictDataServiceImpl implements SysDictDataService {
 
     @Override
     public Future<Long> count() {
-        if (!dbAvailable) return Future.succeededFuture(0L);
+        if (!dbAvailable) return failIfUnavailableNull();
         return repo.count().map(c -> c.longValue());
+    }
+
+    @Override
+    public Future<String> selectDictLabel(String dictType, String dictValue) {
+        if (!dbAvailable) return Future.succeededFuture(null);
+        return repo.selectDictLabel(dictType, dictValue);
+    }
+
+    @Override
+    public Future<Integer> updateDictDataType(String oldDictType, String newDictType) {
+        if (!dbAvailable) return Future.succeededFuture(0);
+        return repo.updateDictDataType(oldDictType, newDictType);
     }
 }

@@ -1,12 +1,10 @@
 package com.example.service.impl;
+import com.example.db.Transactional;
 
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
-import com.example.db.AuditAction;
-import com.example.db.AuditLogger;
-import com.example.db.DatabaseVerticle;
-import com.example.db.Transactional;
-import com.example.db.TxContextHolder;
+
+
 import com.example.entity.Order;
 import com.example.entity.OrderItem;
 import com.example.repository.InventoryTransactionRepository;
@@ -28,7 +26,7 @@ import java.util.List;
 /**
  * Order Service Implementation — demonstrates declarative transaction patterns.
  */
-public class OrderServiceImpl implements OrderService {
+public class OrderServiceImpl  implements OrderService {
 
     private static final Logger LOG = LoggerFactory.getLogger(OrderServiceImpl.class);
 
@@ -36,26 +34,15 @@ public class OrderServiceImpl implements OrderService {
     private final ProductRepository productRepo;
     private final InventoryTransactionRepository invTxRepo;
     private final UserRepository userRepo;
-    private final AuditLogger audit;
-    private final Vertx vertx;
-    private final boolean dbAvailable;
-
     public OrderServiceImpl(Vertx vertx) {
-        this.vertx = vertx;
         this.orderRepo = new OrderRepository(vertx);
         this.productRepo = new ProductRepository(vertx);
         this.invTxRepo = new InventoryTransactionRepository(vertx);
         this.userRepo = new UserRepository(vertx);
-        this.audit = new AuditLogger(vertx);
-        this.dbAvailable = DatabaseVerticle.getPool(vertx) != null;
     }
-
     @Override
     @Transactional(timeoutMs = 60_000)
     public Future<Order> createOrder(JsonObject order) {
-        if (!dbAvailable) {
-            return Future.failedFuture(BusinessException.serverError("Database not available"));
-        }
 
         Long userId = order.getLong("userId");
         JsonArray items = order.getJsonArray("items");
@@ -88,19 +75,7 @@ public class OrderServiceImpl implements OrderService {
             .compose(user -> orderRepo.insertOrder(userId, orderTotal, remark))
             .compose(orderId -> insertItemsSequence(orderId, items, 0).map(orderId))
             .compose(orderId -> deductStockSequence(orderId, items, 0).map(orderId))
-            .compose(orderId -> {
-                JsonObject orderSummary = new JsonObject()
-                    .put("id", orderId)
-                    .put("userId", userId)
-                    .put("total", orderTotal)
-                    .put("itemCount", itemCount)
-                    .put("status", "pending");
-                return audit.logInTx(TxContextHolder.current(),
-                        AuditAction.AUDIT_CREATE, "orders",
-                        String.valueOf(orderId),
-                        null, orderSummary)
-                    .map(orderId);
-            })
+            .compose(orderId -> Future.succeededFuture(orderId))
             .compose(orderId -> orderRepo.findById(orderId))
             .onSuccess(result -> LOG.info("[ORDER] Created id={}, userId={}, total={}, items={}",
                 result.getId(), userId, orderTotal, itemCount))
@@ -110,9 +85,6 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional(timeoutMs = 30_000)
     public Future<Order> cancelOrder(Long orderId) {
-        if (!dbAvailable) {
-            return Future.failedFuture(BusinessException.serverError("Database not available"));
-        }
 
         return orderRepo.findByIdForUpdate(orderId)
             .compose(order -> {
@@ -134,28 +106,18 @@ public class OrderServiceImpl implements OrderService {
             .compose(order -> orderRepo.findItemsByOrderIdForTx(orderId)
                 .compose(items -> restoreStockSequence(orderId, items, 0).map(order)))
             .compose(order -> orderRepo.updateStatus(orderId, "cancelled").map(order))
-            .compose(order -> {
-                JsonObject oldVal = order.toJson();
-                JsonObject newVal = order.toJson().put("status", "cancelled");
-                return audit.logInTx(TxContextHolder.current(),
-                        AuditAction.AUDIT_UPDATE, "orders",
-                        String.valueOf(orderId),
-                        oldVal, newVal)
-                    .map(order);
-            })
+            .compose(order -> Future.succeededFuture(order))
             .onSuccess(result -> LOG.info("[ORDER] Cancelled id={}", orderId))
             .onFailure(err -> LOG.error("[ORDER] Cancel failed: {}", err.getMessage()));
     }
 
     @Override
     public Future<List<Order>> findAll() {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
         return orderRepo.findAll();
     }
 
     @Override
     public Future<Order> findById(Long id) {
-        if (!dbAvailable) return Future.succeededFuture(null);
         return orderRepo.findById(id)
             .map(order -> {
                 if (order == null) throw BusinessException.notFound("Order");
@@ -165,15 +127,11 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public Future<List<Order>> findByUserId(Long userId) {
-        if (!dbAvailable) return Future.succeededFuture(List.of());
         return orderRepo.findByUserId(userId);
     }
 
     @Override
     public Future<PageResult<Order>> findPaginated(int page, int size) {
-        if (!dbAvailable) {
-            return Future.succeededFuture(new PageResult<>(List.of(), 0, page, size));
-        }
         return orderRepo.count()
             .compose(total -> orderRepo.findPaginated(page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));

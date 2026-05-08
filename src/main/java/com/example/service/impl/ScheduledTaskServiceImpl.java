@@ -9,14 +9,11 @@ import io.vertx.core.Vertx;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ScheduledTaskServiceImpl implements ScheduledTaskService {
+public class ScheduledTaskServiceImpl extends BaseServiceImpl<ScheduledTaskRepository> implements ScheduledTaskService {
 
-    private final ScheduledTaskRepository repo;
+    public ScheduledTaskServiceImpl(Vertx vertx) {        super(vertx, ScheduledTaskRepository::new);
 
-    public ScheduledTaskServiceImpl(Vertx vertx) {
-        this.repo = new ScheduledTaskRepository(vertx);
-    }
-
+}
     @Override
     public Future<List<ScheduledTask>> findAll() {
         return repo.findAll();

@@ -3,7 +3,7 @@ package com.example.service.impl;
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
 import com.example.db.AuditAction;
-import com.example.db.AuditLogger;
+
 import com.example.repository.ProductRepository;
 import com.example.service.ProductService;
 import com.example.entity.Product;
@@ -17,34 +17,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Product Service Implementation */
-public class ProductServiceImpl implements ProductService {
+public class ProductServiceImpl extends BaseServiceImpl<ProductRepository> implements ProductService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ProductServiceImpl.class);
-    private final ProductRepository productRepository;
-    private final AuditLogger audit;
-    private final boolean dbAvailable;
-
-    public ProductServiceImpl(Vertx vertx) {
-        this.productRepository = new ProductRepository(vertx);
-        this.audit = new AuditLogger(vertx);
-        this.dbAvailable = checkDbAvailability(vertx);
-        if (!dbAvailable) LOG.warn("Database not available - using demo mode");
-    }
-
-    private boolean checkDbAvailability(Vertx vertx) {
-        try {
-            return com.example.db.DatabaseVerticle.getPool(vertx) != null;
-        } catch (Exception e) {
-            return false;
-        }
-    }
+    public ProductServiceImpl(Vertx vertx) { super(vertx, ProductRepository::new); }
 
     // ── READ ────────────────────────────────────────────────────────────────
 
     @Override
     public Future<List<Product>> findAll() {
         if (!dbAvailable) return Future.succeededFuture(getDemoProducts());
-        return productRepository.findAll();
+        return repo.findAll();
     }
 
     @Override
@@ -54,7 +37,7 @@ public class ProductServiceImpl implements ProductService {
                 .filter(p -> id.equals(p.getId())).findFirst().orElse(null);
             return Future.succeededFuture(found);
         }
-        return productRepository.findById(id)
+        return repo.findById(id)
             .map(p -> {
                 if (p == null) throw BusinessException.notFound("Product");
                 return p;
@@ -73,7 +56,7 @@ public class ProductServiceImpl implements ProductService {
                 .toList();
             return Future.succeededFuture(results);
         }
-        return productRepository.search(keyword, category);
+        return repo.search(keyword, category);
     }
 
     @Override
@@ -85,8 +68,8 @@ public class ProductServiceImpl implements ProductService {
             List<Product> pageData = start < all.size() ? all.subList(start, end) : List.of();
             return Future.succeededFuture(new PageResult<>(pageData, all.size(), page, size));
         }
-        return productRepository.count()
-            .compose(total -> productRepository.findPaginated(page, size)
+        return repo.count()
+            .compose(total -> repo.findPaginated(page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));
     }
 
@@ -105,8 +88,8 @@ public class ProductServiceImpl implements ProductService {
             List<Product> pageData = start < results.size() ? results.subList(start, end) : List.of();
             return Future.succeededFuture(new PageResult<>(pageData, results.size(), page, size));
         }
-        return productRepository.searchCount(keyword, category)
-            .compose(total -> productRepository.searchPaginated(keyword, category, page, size)
+        return repo.searchCount(keyword, category)
+            .compose(total -> repo.searchPaginated(keyword, category, page, size)
                 .map(list -> new PageResult<>(list, total, page, size)));
     }
 
@@ -125,11 +108,11 @@ public class ProductServiceImpl implements ProductService {
             Product created = Product.fromJson(product.toJson().put("id", System.currentTimeMillis()));
             return Future.succeededFuture(created);
         }
-        return productRepository.existsByName(product.getName())
+        return repo.existsByName(product.getName())
             .compose(exists -> {
                 if (exists)
                     return Future.<Product>failedFuture(BusinessException.conflict("Product name already exists"));
-                return productRepository.create(product)
+                return repo.create(product)
                     .map(created -> {
                         audit.log(AuditAction.AUDIT_CREATE, "products", String.valueOf(created.getId()),
                             null, created.toJson());
@@ -143,11 +126,11 @@ public class ProductServiceImpl implements ProductService {
         if (!dbAvailable) {
             return Future.succeededFuture(Product.fromJson(product.toJson().put("id", id)));
         }
-        return productRepository.findById(id)
+        return repo.findById(id)
             .compose(existing -> {
                 if (existing == null)
                     return Future.<Product>failedFuture(BusinessException.notFound("Product"));
-                return productRepository.update(id, product)
+                return repo.update(id, product)
                     .map(updated -> {
                         if (updated == null) throw BusinessException.notFound("Product");
                         audit.log(AuditAction.AUDIT_UPDATE, "products", String.valueOf(id),
@@ -160,11 +143,11 @@ public class ProductServiceImpl implements ProductService {
     @Override
     public Future<Void> delete(Long id) {
         if (!dbAvailable) return Future.succeededFuture();
-        return productRepository.findById(id)
+        return repo.findById(id)
             .compose(existing -> {
                 if (existing == null)
                     return Future.<Void>failedFuture(BusinessException.notFound("Product"));
-                return productRepository.delete(id)
+                return repo.delete(id)
                     .compose(v -> audit.log(AuditAction.AUDIT_DELETE, "products", String.valueOf(id),
                         existing.toJson(), null).mapEmpty());
             });
@@ -199,7 +182,7 @@ public class ProductServiceImpl implements ProductService {
             }
             return Future.succeededFuture(created);
         }
-        return productRepository.createBatch(products);
+        return repo.createBatch(products);
     }
 
     @Override
@@ -217,7 +200,7 @@ public class ProductServiceImpl implements ProductService {
         int[] failed = {0};
         Future<Void> chain = Future.succeededFuture();
         for (Product p : products) {
-            chain = chain.compose(v -> productRepository.update(p.getId(), p)
+            chain = chain.compose(v -> repo.update(p.getId(), p)
                 .onSuccess(u -> { if (u != null) updated.add(u); })
                 .onFailure(e -> failed[0]++).mapEmpty());
         }
@@ -231,7 +214,7 @@ public class ProductServiceImpl implements ProductService {
         if (ids.size() > MAX_BATCH)
             return Future.failedFuture(BusinessException.badRequest("Batch size exceeds maximum of " + MAX_BATCH));
         if (!dbAvailable) return Future.succeededFuture(ids.size());
-        return productRepository.deleteByIds(ids);
+        return repo.deleteByIds(ids);
     }
 
     // ── EXTRA ───────────────────────────────────────────────────────────────
@@ -241,7 +224,7 @@ public class ProductServiceImpl implements ProductService {
             return Future.succeededFuture(getDemoProducts().stream()
                 .filter(p -> category.equalsIgnoreCase(p.getCategory())).toList());
         }
-        return productRepository.findByCategory(category);
+        return repo.findByCategory(category);
     }
 
     // ── DEMO DATA ───────────────────────────────────────────────────────────

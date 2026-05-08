@@ -19,6 +19,8 @@ public interface SysDictDataService {
     Future<Void> delete(Long id);
     Future<Void> deleteByDictType(String dictType);
     Future<Boolean> existsByDictTypeAndValue(String dictType, String dictValue);
+    Future<String> selectDictLabel(String dictType, String dictValue);
+    Future<Integer> updateDictDataType(String oldDictType, String newDictType);
     Future<PageResult<SysDictData>> findPaginated(int page, int size);
     Future<PageResult<SysDictData>> searchPaginated(String dictType, String dictLabel, String status, int page, int size);
     Future<Long> count();

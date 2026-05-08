@@ -176,6 +176,31 @@ public class SysDictTypeRepository {
     }
 
     // ================================================================
+    // FILTER / UNIQUE CHECK (mirrors RuoYi SysDictTypeMapper)
+    // ================================================================
+
+    /**
+     * Select dict type list by filter entity (dictName / dictType / status).
+     * Mirrors: SysDictTypeMapper.selectDictTypeList(SysDictType)
+     */
+    public Future<List<SysDictType>> selectDictTypeList(SysDictType filter) {
+        if (filter == null) return findAll();
+        return search(
+            filter.getDictName(),
+            filter.getDictType(),
+            filter.getStatus()
+        );
+    }
+
+    /**
+     * Check dictType uniqueness — returns the entity if found (not unique),
+     * null if not found (unique). Mirrors: SysDictTypeMapper.checkDictTypeUnique(String)
+     */
+    public Future<SysDictType> checkDictTypeUnique(String dictType) {
+        return findByDictType(dictType);
+    }
+
+    // ================================================================
     // PAGINATION
     // ================================================================
 

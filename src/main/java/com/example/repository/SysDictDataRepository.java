@@ -67,6 +67,13 @@ public class SysDictDataRepository {
         return DatabaseVerticle.query(vertx, sql, params).map(this::toOne);
     }
 
+    public Future<String> selectDictLabel(String dictType, String dictValue) {
+        String sql = "SELECT dict_label FROM sys_dict_data WHERE dict_type = $1 AND dict_value = $2";
+        Tuple params = Tuple.tuple().addString(dictType).addString(dictValue);
+        return DatabaseVerticle.query(vertx, sql, params)
+            .map(rows -> rows.iterator().hasNext() ? rows.iterator().next().getString("dict_label") : null);
+    }
+
     public Future<List<SysDictData>> findByDictLabel(String dictLabel) {
         if (dictLabel == null || dictLabel.isEmpty()) {
             return findAll();
@@ -218,6 +225,12 @@ public class SysDictDataRepository {
     public Future<Integer> deleteByDictType(String dictType) {
         String sql = "DELETE FROM sys_dict_data WHERE dict_type = $1";
         Tuple params = Tuple.tuple().addString(dictType);
+        return DatabaseVerticle.query(vertx, sql, params).map(rows -> rows.rowCount());
+    }
+
+    public Future<Integer> updateDictDataType(String oldDictType, String newDictType) {
+        String sql = "UPDATE sys_dict_data SET dict_type = $1, update_time = CURRENT_TIMESTAMP WHERE dict_type = $2";
+        Tuple params = Tuple.tuple().addString(newDictType).addString(oldDictType);
         return DatabaseVerticle.query(vertx, sql, params).map(rows -> rows.rowCount());
     }
 

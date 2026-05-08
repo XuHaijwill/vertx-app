@@ -37,3 +37,4 @@ Thumbs.db
 config.local.json
 *.ps
 *.ps1
+*.py
