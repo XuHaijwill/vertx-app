@@ -1,6 +1,8 @@
 package com.example.auth;
 
 import com.example.cache.TokenCacheManager;
+import com.example.db.AuditContext;
+import com.example.db.AuditContextHolder;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -219,6 +221,24 @@ public class KeycloakAuthHandler implements io.vertx.core.Handler<RoutingContext
                 ctx.put("tokenFromCache", false);
                 // AuthUser for the permission system
                 ctx.put("authUser", authUser);
+
+                // Bind AuditContext for the full request lifecycle
+                String traceId = tokenInfo.getString("jti");
+                String reqId = ctx.get("requestId");
+                String fwd = ctx.request().getHeader("X-Forwarded-For");
+                String realIp = ctx.request().getHeader("X-Real-IP");
+                String remoteAddr = ctx.request().remoteAddress() != null ? ctx.request().remoteAddress().host() : null;
+                String ua = ctx.request().getHeader("User-Agent");
+
+                AuditContext auditCtx = new AuditContext()
+                    .setUserId(userId)
+                    .setUsername(username)
+                    .setOrGenerateTraceId(traceId, reqId)
+                    .setRequestId(reqId)
+                    .setUserIpFromHeader(fwd, realIp, remoteAddr)
+                    .setUserAgent(ua)
+                    .setServiceName("vertx-app");
+                AuditContextHolder.bind(auditCtx);
 
                 LOG.debug("[AUTH] JWT validated: {}, roles: {}", username, roles);
                 ctx.next();
