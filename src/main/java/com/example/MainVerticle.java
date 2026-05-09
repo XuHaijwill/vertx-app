@@ -6,6 +6,7 @@ import com.example.auth.KeycloakAuthHandler;
 import com.example.cache.TokenCacheManager;
 import com.example.core.ApiResponse;
 import com.example.core.Config;
+import com.example.handlers.AccessLogHandler;
 import com.example.handlers.ErrorHandler;
 import com.example.verticles.SchedulerVerticle;
 import io.vertx.core.AbstractVerticle;
@@ -167,6 +168,9 @@ public class MainVerticle extends AbstractVerticle {
 
         if (!authConfig.isEnabled()) {
             LOG.info("[AUTH] Authentication disabled �?all endpoints are open");
+            // No auth, but still install access log handler
+            router.route(contextPath + "/api/*").handler(new AccessLogHandler(vertx));
+            LOG.info("[ACCESS-LOG] Handler installed on {}/api/* (no auth)", contextPath);
             return Future.succeededFuture(null);
         }
 
@@ -191,6 +195,10 @@ public class MainVerticle extends AbstractVerticle {
                     // Apply auth handler to /api/* routes under context-path
                     router.route(contextPath + "/api/*").handler(handler);
                     LOG.info("[AUTH] Keycloak auth handler installed on {}/api/*", contextPath);
+
+                    // Access logging — after auth so user info is available
+                    router.route(contextPath + "/api/*").handler(new AccessLogHandler(vertx));
+                    LOG.info("[ACCESS-LOG] Handler installed on {}/api/*", contextPath);
                 })
                 .onFailure(err -> {
                     LOG.error("[AUTH] Failed to setup Keycloak auth: {}", err.getMessage());
@@ -212,14 +220,19 @@ public class MainVerticle extends AbstractVerticle {
         new SysDictTypeApi(vertx).registerRoutes(router, contextPath);
         new SysDictDataApi(vertx).registerRoutes(router, contextPath);
         new SysMenuApi(vertx).registerRoutes(router, contextPath);
+        new SysNoticeApi(vertx).registerRoutes(router, contextPath);
+        new SysNoticeReadApi(vertx).registerRoutes(router, contextPath);
         new ScheduledTaskApi(vertx).registerRoutes(router, contextPath);
         new DocsApi(vertx).registerRoutes(router, contextPath);
         new OrderApi(vertx).registerRoutes(router, contextPath);
         new PaymentApi(vertx).registerRoutes(router, contextPath);
         new BatchApi(vertx).registerRoutes(router, contextPath);
         new AuthApi(vertx, authConfig).registerRoutes(router, contextPath);
+        new AuditApi(vertx).registerRoutes(router, contextPath);
+        new AccessLogApi(vertx).registerRoutes(router, contextPath);
+        new GenTableApi(vertx).registerRoutes(router, contextPath);
 
-        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, SysDictType, SysDictData, SysMenu, ScheduledTask, Order, Payment, Batch, Docs, Auth");
+        LOG.info("[OK] APIs registered: Health, User, Product, SysConfig, SysDictType, SysDictData, SysMenu, SysNotice, SysNoticeRead, ScheduledTask, Order, Payment, Batch, Docs, Auth, Audit, AccessLog, GenTable");
     }
 
     // ================================================================

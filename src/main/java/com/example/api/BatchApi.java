@@ -1,5 +1,6 @@
 package com.example.api;
 
+import com.example.auth.RequirePermission;
 import com.example.core.BusinessException;
 import com.example.db.Transactional;
 import com.example.repository.OrderRepository;
@@ -39,10 +40,21 @@ public class BatchApi extends BaseApi {
 
     @Override
     public void registerRoutes(Router router, String contextPath) {
-        router.post(contextPath + "/api/batch/orders/:id/items").handler(this::batchInsertOrderItems);
-        router.post(contextPath + "/api/batch/orders/status").handler(this::batchUpdateOrderStatus);
-        router.post(contextPath + "/api/batch/products/stock/deduct").handler(this::batchDeductStock);
-        router.post(contextPath + "/api/batch/products/stock/restore").handler(this::batchRestoreStock);
+        // Order batch operations
+        router.post(contextPath + "/api/batch/orders/:id/items")
+            .handler(RequirePermission.of("system:order:edit"))
+            .handler(this::batchInsertOrderItems);
+        router.post(contextPath + "/api/batch/orders/status")
+            .handler(RequirePermission.of("system:order:edit"))
+            .handler(this::batchUpdateOrderStatus);
+        
+        // Product batch operations
+        router.post(contextPath + "/api/batch/products/stock/deduct")
+            .handler(RequirePermission.of("system:product:edit"))
+            .handler(this::batchDeductStock);
+        router.post(contextPath + "/api/batch/products/stock/restore")
+            .handler(RequirePermission.of("system:product:edit"))
+            .handler(this::batchRestoreStock);
     }
 
     /**

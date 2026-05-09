@@ -1,18 +1,19 @@
 package com.example.service.impl;
-import com.example.db.Transactional;
 
 import com.example.core.BusinessException;
 import com.example.core.PageResult;
-
-
+import com.example.db.TransactionContext;
+import com.example.db.TransactionTemplate;
+import com.example.db.Transactional;
+import com.example.db.TxContextHolder;
 import com.example.entity.Order;
 import com.example.entity.OrderItem;
+import com.example.entity.Product;
 import com.example.repository.InventoryTransactionRepository;
 import com.example.repository.OrderRepository;
 import com.example.repository.ProductRepository;
 import com.example.repository.UserRepository;
 import com.example.service.OrderService;
-import com.example.entity.Product;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -26,24 +27,28 @@ import java.util.List;
 /**
  * Order Service Implementation — demonstrates declarative transaction patterns.
  */
-public class OrderServiceImpl  implements OrderService {
+public class OrderServiceImpl implements OrderService {
 
     private static final Logger LOG = LoggerFactory.getLogger(OrderServiceImpl.class);
 
+    private final Vertx vertx;
     private final OrderRepository orderRepo;
     private final ProductRepository productRepo;
     private final InventoryTransactionRepository invTxRepo;
     private final UserRepository userRepo;
+    private final TransactionTemplate txTemplate;
+
     public OrderServiceImpl(Vertx vertx) {
+        this.vertx = vertx;
         this.orderRepo = new OrderRepository(vertx);
         this.productRepo = new ProductRepository(vertx);
         this.invTxRepo = new InventoryTransactionRepository(vertx);
         this.userRepo = new UserRepository(vertx);
+        this.txTemplate = new TransactionTemplate(vertx);
     }
     @Override
-    @Transactional(timeoutMs = 60_000)
     public Future<Order> createOrder(JsonObject order) {
-
+        // Input validation (outside transaction)
         Long userId = order.getLong("userId");
         JsonArray items = order.getJsonArray("items");
         String remark = order.getString("remark", "");
@@ -71,21 +76,29 @@ public class OrderServiceImpl  implements OrderService {
         final BigDecimal orderTotal = total;
         final int itemCount = items.size();
 
-        return userRepo.findByIdForUpdate(userId)
-            .compose(user -> orderRepo.insertOrder(userId, orderTotal, remark))
-            .compose(orderId -> insertItemsSequence(orderId, items, 0).map(orderId))
-            .compose(orderId -> deductStockSequence(orderId, items, 0).map(orderId))
-            .compose(orderId -> Future.succeededFuture(orderId))
-            .compose(orderId -> orderRepo.findById(orderId))
+        // Execute within transaction
+        return txTemplate.wrap(tx -> doCreateOrder(userId, orderTotal, remark, items), 60_000)
             .onSuccess(result -> LOG.info("[ORDER] Created id={}, userId={}, total={}, items={}",
                 result.getId(), userId, orderTotal, itemCount))
             .onFailure(err -> LOG.error("[ORDER] Create failed: {}", err.getMessage()));
     }
 
-    @Override
-    @Transactional(timeoutMs = 30_000)
-    public Future<Order> cancelOrder(Long orderId) {
+    private Future<Order> doCreateOrder(Long userId, BigDecimal total, String remark, JsonArray items) {
+        return userRepo.findByIdForUpdate(userId)
+            .compose(user -> orderRepo.insertOrder(userId, total, remark))
+            .compose(orderId -> insertItemsSequence(orderId, items, 0).map(orderId))
+            .compose(orderId -> deductStockSequence(orderId, items, 0).map(orderId))
+            .compose(orderId -> orderRepo.findById(orderId));
+    }
 
+    @Override
+    public Future<Order> cancelOrder(Long orderId) {
+        return txTemplate.wrap(tx -> doCancelOrder(orderId), 30_000)
+            .onSuccess(result -> LOG.info("[ORDER] Cancelled id={}", orderId))
+            .onFailure(err -> LOG.error("[ORDER] Cancel failed: {}", err.getMessage()));
+    }
+
+    private Future<Order> doCancelOrder(Long orderId) {
         return orderRepo.findByIdForUpdate(orderId)
             .compose(order -> {
                 String status = order.getStatus();
@@ -105,10 +118,7 @@ public class OrderServiceImpl  implements OrderService {
             })
             .compose(order -> orderRepo.findItemsByOrderIdForTx(orderId)
                 .compose(items -> restoreStockSequence(orderId, items, 0).map(order)))
-            .compose(order -> orderRepo.updateStatus(orderId, "cancelled").map(order))
-            .compose(order -> Future.succeededFuture(order))
-            .onSuccess(result -> LOG.info("[ORDER] Cancelled id={}", orderId))
-            .onFailure(err -> LOG.error("[ORDER] Cancel failed: {}", err.getMessage()));
+            .compose(order -> orderRepo.updateStatus(orderId, "cancelled").map(order));
     }
 
     @Override

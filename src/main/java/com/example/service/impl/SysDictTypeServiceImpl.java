@@ -30,20 +30,26 @@ public class SysDictTypeServiceImpl extends BaseServiceImpl<SysDictTypeRepositor
     /** create/update 内部执行 + 审计，返回 SysDictType */
     private Future<SysDictType> doCreate(SysDictType dictType) {
         return repo.create(dictType)
-            .compose(created -> audit.log(
-                    AuditAction.AUDIT_CREATE, "sys_dict_type",
-                    String.valueOf(created.getDictId()),
-                    null, created.toJson())
-                .map(created));
+            .compose(created -> {
+                if (!dbAvailable) return Future.succeededFuture(created);
+                return audit.log(
+                        AuditAction.AUDIT_CREATE, "sys_dict_type",
+                        String.valueOf(created.getDictId()),
+                        null, created.toJson())
+                    .map(created);
+            });
     }
 
     private Future<SysDictType> doUpdate(Long id, SysDictType dictType, SysDictType existing) {
         return repo.update(id, dictType)
-            .compose(updated -> audit.log(
-                    AuditAction.AUDIT_UPDATE, "sys_dict_type",
-                    String.valueOf(id),
-                    existing.toJson(), updated.toJson())
-                .map(updated));
+            .compose(updated -> {
+                if (!dbAvailable) return Future.succeededFuture(updated);
+                return audit.log(
+                        AuditAction.AUDIT_UPDATE, "sys_dict_type",
+                        String.valueOf(id),
+                        existing.toJson(), updated.toJson())
+                    .map(updated);
+            });
     }
 
     // ================================================================

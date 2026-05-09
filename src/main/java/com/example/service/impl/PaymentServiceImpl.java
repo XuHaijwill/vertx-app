@@ -5,13 +5,13 @@ import com.example.db.*;
 import com.example.entity.Order;
 import com.example.entity.OrderItem;
 import com.example.entity.Payment;
+import com.example.entity.Product;
 import com.example.repository.InventoryTransactionRepository;
 import com.example.repository.OrderRepository;
 import com.example.repository.PaymentRepository;
 import com.example.repository.ProductRepository;
 import com.example.repository.UserRepository;
 import com.example.service.PaymentService;
-import com.example.entity.Product;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -24,26 +24,29 @@ import java.util.List;
 /**
  * Payment Service Implementation — 5-table / 4-table multi-Repository declarative transactions.
  */
-public class PaymentServiceImpl  implements PaymentService {
+public class PaymentServiceImpl implements PaymentService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PaymentServiceImpl.class);
 
+    private final Vertx vertx;
     private final PaymentRepository paymentRepo;
     private final OrderRepository orderRepo;
     private final UserRepository userRepo;
     private final ProductRepository productRepo;
     private final InventoryTransactionRepository invTxRepo;
+    private final TransactionTemplate txTemplate;
+
     public PaymentServiceImpl(Vertx vertx) {
+        this.vertx = vertx;
         this.paymentRepo = new PaymentRepository(vertx);
         this.orderRepo = new OrderRepository(vertx);
         this.userRepo = new UserRepository(vertx);
         this.productRepo = new ProductRepository(vertx);
         this.invTxRepo = new InventoryTransactionRepository(vertx);
+        this.txTemplate = new TransactionTemplate(vertx);
     }
     @Override
-    @Transactional(timeoutMs = 30_000)
     public Future<Payment> processPayment(JsonObject request) {
-
         Long orderId = request.getLong("orderId");
         String method = request.getString("method", "balance");
 
@@ -51,6 +54,13 @@ public class PaymentServiceImpl  implements PaymentService {
             return Future.failedFuture(BusinessException.badRequest("orderId is required"));
         }
 
+        return txTemplate.wrap(tx -> doProcessPayment(orderId, method), 30_000)
+            .onSuccess(result -> LOG.info("[PAY] Processed: orderId={}, paymentId={}, method={}",
+                orderId, result.getId(), method))
+            .onFailure(err -> LOG.error("[PAY] Failed: orderId={}, err={}", orderId, err.getMessage()));
+    }
+
+    private Future<Payment> doProcessPayment(Long orderId, String method) {
         return paymentRepo.findByOrderIdForTx(orderId)
             .compose(existing -> {
                 if (existing != null && "completed".equals(existing.getStatus())) {
@@ -58,14 +68,11 @@ public class PaymentServiceImpl  implements PaymentService {
                     existing.setRemark("_idempotent");
                     return Future.succeededFuture(existing);
                 }
-                return doProcessPayment(orderId, method);
-            })
-            .onSuccess(result -> LOG.info("[PAY] Processed: orderId={}, paymentId={}, method={}",
-                orderId, result.getId(), method))
-            .onFailure(err -> LOG.error("[PAY] Failed: orderId={}, err={}", orderId, err.getMessage()));
+                return doProcessPaymentImpl(orderId, method);
+            });
     }
 
-    private Future<Payment> doProcessPayment(Long orderId, String method) {
+    private Future<Payment> doProcessPaymentImpl(Long orderId, String method) {
         return orderRepo.findByIdForUpdate(orderId)
             .compose(order -> {
                 String status = order.getStatus();
@@ -111,9 +118,13 @@ public class PaymentServiceImpl  implements PaymentService {
     }
 
     @Override
-    @Transactional(timeoutMs = 20_000)
     public Future<Payment> refundPayment(Long paymentId) {
+        return txTemplate.wrap(tx -> doRefundPayment(paymentId), 20_000)
+            .onSuccess(result -> LOG.info("[PAY] Refunded: paymentId={}", paymentId))
+            .onFailure(err -> LOG.error("[PAY] Refund failed: paymentId={}, err={}", paymentId, err.getMessage()));
+    }
 
+    private Future<Payment> doRefundPayment(Long paymentId) {
         return lockPaymentForUpdate(paymentId)
             .compose(payment -> {
                 if (payment == null) {
@@ -145,11 +156,8 @@ public class PaymentServiceImpl  implements PaymentService {
                 Long orderId = payment.getOrderId();
                 return orderRepo.updateStatus(orderId, "refunded").map(payment);
             })
-            .compose(payment -> Future.succeededFuture(payment))
             .compose(payment -> findPaymentEnriched(paymentId)
-                .recover(err -> Future.succeededFuture(payment)))
-            .onSuccess(result -> LOG.info("[PAY] Refunded: paymentId={}", paymentId))
-            .onFailure(err -> LOG.error("[PAY] Refund failed: paymentId={}, err={}", paymentId, err.getMessage()));
+                .recover(err -> Future.succeededFuture(payment)));
     }
 
     @Override
@@ -179,8 +187,8 @@ public class PaymentServiceImpl  implements PaymentService {
     private Future<Payment> lockPaymentForUpdate(Long paymentId) {
         TransactionContext tx = TxContextHolder.current();
         if (tx == null) {
-            return Future.failedFuture(new IllegalStateException(
-                "lockPaymentForUpdate called outside a transaction"));
+            return Future.failedFuture(BusinessException.badRequest(
+                "Payment operation requires active transaction"));
         }
         tx.tick();
         String sql = "SELECT * FROM payments WHERE id = $1 FOR UPDATE";
@@ -191,8 +199,8 @@ public class PaymentServiceImpl  implements PaymentService {
     private Future<Payment> findPaymentEnriched(Long paymentId) {
         TransactionContext tx = TxContextHolder.current();
         if (tx == null) {
-            return Future.failedFuture(new IllegalStateException(
-                "findPaymentEnriched called outside a transaction"));
+            return Future.failedFuture(BusinessException.badRequest(
+                "Payment query requires active transaction"));
         }
         tx.tick();
         String sql = "SELECT p.*, o.total as order_total, o.status as order_status, " +
